@@ -1,0 +1,9 @@
+robot:
+  host: "192.168.0.14:5700"
+pusher:
+  app_id: ""
+  key: ""
+  secret: ""
+  cluster: "ap1"
+channel_config_path: "./channels"
+debug: false

@@ -1,0 +1,18 @@
+{
+  "name": "isekai-pusher2coolq",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "run": "node index.js"
+  },
+  "author": "hyperzlib",
+  "license": "MIT",
+  "dependencies": {
+    "pusher": "^3.0.1",
+    "pusher-js": "^5.1.1",
+    "request": "^2.88.2",
+    "request-promise": "^4.2.5",
+    "yaml": "^1.8.3"
+  }
+}

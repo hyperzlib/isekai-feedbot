@@ -1,0 +1,10 @@
+channel: "server_status"
+templates:
+  disconnect: "{{data.srcName}} 与 {{data.dstName}} 的连接已断开"
+  connect: "{{data.srcName}} 与 {{data.dstName}} 的连接已恢复"
+receiver:
+  group:
+    - 111111111
+    - 111111111
+  user:
+    - 111111111

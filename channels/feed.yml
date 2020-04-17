@@ -1,0 +1,12 @@
+channel: "feed"
+files:
+  thumb: "data.image"
+templates:
+  thumb: "[CQ:image,file={{data.image}}]"
+  feed: "{{utils.getCurrentDate()}}的异世界百科摘要：\n{{utils.dictJoin(data.feedList)}}"
+receiver:
+  group:
+    - 111111111
+    - 111111111
+  user:
+    - 111111111
