@@ -8,7 +8,11 @@
     "start-dev": "tsc && node index.js",
     "build": "tsc"
   },
-  "author": "hyperzlib",
+  "author": {
+    "name": "hyperzlib",
+    "email": "hyperzlib@outlook.com",
+    "url": "https://github.com/hyperzlib"
+  },
   "license": "MIT",
   "dependencies": {
     "chokidar": "^3.5.1",
