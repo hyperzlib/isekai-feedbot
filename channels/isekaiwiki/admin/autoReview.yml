@@ -1,0 +1,11 @@
+name: 自动审核通过
+provider: pusher
+source:
+  service: pusher
+  channel: isekaiwiki
+  type: autoReview
+tpl:
+  default: |-
+    {{data.author}} 更新了新页面: {{data.title}}
+    {{data.summary}}
+    {{data.result}}

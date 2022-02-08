@@ -1,0 +1,9 @@
+qq:
+  user:
+    1234567890:
+      - some_channel_group/*
+      - some_channel_group2/some_channel
+  group:
+    1234567890:
+      - some_channel_group/*
+      - some_channel_group2/some_channel

@@ -1,0 +1,11 @@
+name: 修改页面
+provider: pusher
+source:
+  service: pusher
+  channel: isekaiwiki
+  type: edit
+tpl:
+  default: |-
+    {{data.author}} 更新了页面: {{data.title}}
+    {{data.summary}}
+    {{data.url}}

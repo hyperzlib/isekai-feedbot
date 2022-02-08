@@ -1,0 +1,11 @@
+name: 新页面
+provider: pusher
+source:
+  service: pusher
+  channel: isekaiwiki
+  type: new
+tpl:
+  default: |-
+    {{data.author}} 创建了新页面: {{data.title}}
+    {{data.summary}}
+    {{data.url}}

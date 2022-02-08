@@ -1,8 +1,0 @@
-channel: "debug"
-templates:
-  message: "{{data.message}}"
-receiver:
-  group:
-    - 11111111111
-  user:
-    - 11111111111

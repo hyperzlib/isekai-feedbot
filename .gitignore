@@ -1,3 +1,4 @@
 config.yml
+subscribe.yml
 node_modules/
-package-lock.json
+dist/
