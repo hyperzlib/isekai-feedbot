@@ -9,6 +9,7 @@ import { ProviderManager } from './ProviderManager';
 import { RestfulApiManager } from './RestfulApiManager';
 import { RobotManager } from './RobotManager';
 import { Service, ServiceManager } from './ServiceManager';
+import { Setup } from './Setup';
 import { SubscribeManager, Target } from './SubscribeManager';
 
 export default class App {
@@ -28,12 +29,17 @@ export default class App {
     }
 
     async initialize() {
+        await this.initModules();
         await this.initRobot();
         await this.initProviderManager();
         await this.initServiceManager();
         await this.initSubscribeManager();
         await this.initChannelManager();
         console.log('初始化完成，正在接收消息');
+    }
+
+    async initModules() {
+        await Setup.initHandlebars();
     }
 
     async initRobot() {
