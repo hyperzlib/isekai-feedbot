@@ -3,9 +3,7 @@ import Handlebars from "handlebars";
 import App from "../App";
 import { MultipleMessage } from "../base/provider/BaseProvider";
 import { ConfigCheckError } from "../error/ConfigCheckError";
-
-// 请勿删除这些没有使用的导入，模板中会用到
-const { Utils } = require('../Utils');
+import { Utils } from "../Utils";
 
 export type TemplateFilterConfig = { [key: string]: string };
 
@@ -23,6 +21,7 @@ export class TemplateFilter {
     }
 
     async initialize() {
+        this.initHandlebars();
         for (let key in this.config) {
             let template = this.config[key];
             if (key === "default") {
@@ -38,6 +37,22 @@ export class TemplateFilter {
         for (let key in this.renderFunctionList){
             delete this.renderFunctionList[key];
         }
+    }
+
+    initHandlebars() {
+        Handlebars.registerHelper('excerpt', (...args) => {
+            if (args.length > 2) {
+                let text: any = args[0];
+                let maxLength: any = parseInt(args[1]);
+                let ellipsis: any = undefined;
+                if (args.length > 3) {
+                    return Utils.excerpt(text, parseInt(maxLength), ellipsis);
+                }
+            }
+            return args[0];
+        });
+
+        Handlebars.registerHelper('currentDate', Utils.getCurrentDate);
     }
 
     checkConfig() {
