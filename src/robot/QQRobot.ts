@@ -31,9 +31,9 @@ export default class QQRobot implements Robot {
 
     /**
      * 发送私聊消息
-     * @param {int|int[]} user - QQ号
-     * @param {string} message - 消息
-     * @returns {Promise<void>} 回调
+     * @param user - QQ号
+     * @param message - 消息
+     * @returns 回调
      */
     async sendToUser(user: number|number[], message: string) {
         if(Array.isArray(user)){ //发送给多个用户的处理

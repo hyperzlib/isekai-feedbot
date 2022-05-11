@@ -6,6 +6,7 @@ import { BaseProvider, MultipleMessage } from './base/provider/BaseProvider';
 import { ChannelManager } from './ChannelManager';
 import { ChannelConfig, Config } from './Config';
 import { ProviderManager } from './ProviderManager';
+import { RestfulApiManager } from './RestfulApiManager';
 import { RobotManager } from './RobotManager';
 import { Service, ServiceManager } from './ServiceManager';
 import { SubscribeManager, Target } from './SubscribeManager';
@@ -19,6 +20,7 @@ export default class App {
     public service!: ServiceManager;
     public subscribe!: SubscribeManager;
     public channel!: ChannelManager;
+    public restfulApi!: RestfulApiManager;
 
     constructor(configFile: string) {
         this.config = Yaml.parse(fs.readFileSync(configFile, { encoding: 'utf-8' }));
@@ -69,6 +71,11 @@ export default class App {
         });
 
         await this.channel.initialize();
+    }
+
+    async initRestfulApiManager() {
+        this.restfulApi = new RestfulApiManager(this, this.config.http_api);
+        await this.restfulApi.initialize();
     }
 
     /**

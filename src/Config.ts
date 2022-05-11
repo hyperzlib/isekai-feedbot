@@ -7,11 +7,18 @@ export type Config = {
     debug: boolean;
     robot: { [key: string]: RobotConfig };
     service: { [key: string]: ServiceConfig };
+    http_api: RestfulApiConfig;
 };
 
 export type RobotConfig = {
     type: string;
     baseId: string;
+};
+
+export type RestfulApiConfig = {
+    host: string;
+    port: number;
+    tokens: { [type: string]: any };
 };
 
 export type ServiceConfig = { [name: string]: any };
