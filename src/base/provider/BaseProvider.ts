@@ -31,7 +31,7 @@ export class BaseProvider {
     }
 
     static checkConfig(config: any) {
-        if (typeof config.source !== "object") {
+        if (typeof config?.source !== "object") {
             return false;
         }
 
