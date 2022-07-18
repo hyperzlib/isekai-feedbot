@@ -15,6 +15,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@types/node-telegram-bot-api": "^0.57.1",
     "chokidar": "^3.5.1",
     "decoders": "^1.25.3",
     "handlebars": "^4.7.7",
@@ -23,6 +24,7 @@
     "lua-runner": "^2.0.3",
     "micromatch": "^4.0.4",
     "node-schedule": "^2.0.0",
+    "node-telegram-bot-api": "^0.58.0",
     "pusher": "^3.0.1",
     "pusher-js": "^5.1.1",
     "request": "^2.88.2",

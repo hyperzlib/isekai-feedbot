@@ -44,11 +44,10 @@ export default class QQRobot implements Robot {
             return;
         }
 
-        return await this.doApiRequest('send_msg', {
-            bot: this.botQQ,
-            type: 1,
-            qq: user,
-            msg: message,
+        return await this.doApiRequest('send_private_msg', {
+            bot_id: this.botQQ,
+            user_id: user,
+            message: message,
         });
     }
 
@@ -64,11 +63,10 @@ export default class QQRobot implements Robot {
             return;
         }
 
-        return await this.doApiRequest('send_msg', {
-            bot: this.botQQ,
-            type: 2,
-            group: group,
-            msg: message,
+        return await this.doApiRequest('send_group_msg', {
+            bot_id: this.botQQ,
+            group_id: group,
+            message: message,
         });
     }
 
