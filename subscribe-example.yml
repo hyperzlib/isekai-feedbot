@@ -1,9 +1,9 @@
 qq:
   user:
     1234567890:
-      - some_channel_group/*
+      - some_channel_group                 # 订阅频道组会订阅下一级的全部频道，但是不会订阅更深层级的频道
       - some_channel_group2/some_channel
   group:
     1234567890:
-      - some_channel_group/*
+      - some_channel_group
       - some_channel_group2/some_channel

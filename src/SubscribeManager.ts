@@ -38,6 +38,7 @@ export class SubscribeManager {
         this.subscribeConfig = {};
 
         this.loadSubscribeFile();
+        this.rebuildTree();
     }
 
     public async initialize() {
@@ -133,23 +134,7 @@ export class SubscribeManager {
      * @param channelId 频道ID
      */
     public addChannel(channelId: string) {
-        this.subscribeList[channelId] = {};
-        for (let robotId in this.subscribeConfig) {
-            this.prepareTree(robotId, channelId); // 这里就先创建tree
-            let targetConf = this.subscribeConfig[robotId];
-            for (let targetType in targetConf) {
-                let targetList = targetConf[targetType];
-                for (let targetIdentity in targetList) {
-                    let subscribeChannelList = targetList[targetIdentity];
-                    if (subscribeChannelList.includes(channelId)) {
-                        this.subscribeList[channelId][robotId].push({
-                            type: targetType,
-                            identity: targetIdentity
-                        });
-                    }
-                }
-            }
-        }
+        
     }
     
     /**
@@ -157,7 +142,7 @@ export class SubscribeManager {
      * @param channelId 频道ID
      */
     public removeChannel(channelId: string) {
-        delete this.subscribeList[channelId];
+        
     }
 
     /**
