@@ -67,7 +67,6 @@ export class ChannelManager extends EventEmitter {
         let nameList: string[] = [];
         for (let i = 0; i < pathList.length; i++) {
             let currentPath = pathList.slice(0, i + 1).join("/");
-            console.log(currentPath);
             let findedName = this.channelName[currentPath];
             if (findedName) {
                 nameList.push(findedName);
