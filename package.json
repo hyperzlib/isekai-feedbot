@@ -33,6 +33,7 @@
     "yaml": "^1.8.3"
   },
   "devDependencies": {
+    "@types/bluebird-global": "^3.5.13",
     "@types/koa": "^2.13.4",
     "@types/koa-router": "^7.4.4",
     "@types/micromatch": "^4.0.2",

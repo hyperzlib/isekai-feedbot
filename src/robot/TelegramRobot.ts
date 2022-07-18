@@ -1,4 +1,3 @@
-import Bluebird from "bluebird";
 import TelegramBot from "node-telegram-bot-api";
 import App from "../App";
 import { Robot } from "../RobotManager";
