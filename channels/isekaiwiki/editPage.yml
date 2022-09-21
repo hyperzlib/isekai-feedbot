@@ -6,6 +6,6 @@ source:
   type: edit
 tpl:
   default: |-
-    {{data.author}} 更新了页面: {{data.title}}
-    {{data.summary}}
-    {{data.url}}
+    {{{author}}} 更新了页面: {{{title}}}
+    {{{summary}}}
+    {{{url}}}

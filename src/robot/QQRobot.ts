@@ -45,9 +45,8 @@ export default class QQRobot implements Robot {
         }
 
         return await this.doApiRequest('send_private_msg', {
-            bot_id: this.botQQ,
             user_id: user,
-            message: message,
+            message: message
         });
     }
 
@@ -64,9 +63,8 @@ export default class QQRobot implements Robot {
         }
 
         return await this.doApiRequest('send_group_msg', {
-            bot_id: this.botQQ,
             group_id: group,
-            message: message,
+            message: message
         });
     }
 

@@ -6,6 +6,6 @@ source:
   type: new
 tpl:
   default: |-
-    {{data.author}} 创建了新页面: {{data.title}}
-    {{data.summary}}
-    {{data.url}}
+    {{{author}}} 创建了新页面: {{{title}}}
+    {{{summary}}}
+    {{{url}}}

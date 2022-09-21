@@ -7,5 +7,5 @@ source:
 tpl:
   default: |-
     Review队列更新：
-    {{data.author}} 更新了新页面: {{data.title}}
-    {{data.summary}}
+    {{{author}}} 更新了页面: {{{title}}}
+    {{{summary}}}
