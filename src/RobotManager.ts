@@ -93,7 +93,7 @@ export class RobotManager {
             }
 
             try {
-                robot.sendMessage(targets, currentMsg);
+                await robot.sendMessage(targets, currentMsg);
             } catch(err) {
                 console.error(`[${channelId}] 无法发送消息到 ${robotId} : `, err);
             }

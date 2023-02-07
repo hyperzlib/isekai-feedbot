@@ -10,8 +10,9 @@ export class Setup {
                 let maxLength: any = parseInt(args[1]);
                 let ellipsis: any = undefined;
                 if (args.length > 3) {
-                    return Utils.excerpt(text, parseInt(maxLength), ellipsis);
+                    ellipsis = args[2];
                 }
+                return Utils.excerpt(text, parseInt(maxLength), ellipsis);
             }
             return args[0];
         });
