@@ -6,6 +6,7 @@ source:
   type: needReview
 tpl:
   default: |-
-    Review队列更新：
-    {{data.author}} 更新了新页面: {{data.title}}
-    {{data.summary}}
+    Review队列中增加了新页面:
+    编辑者: {{{author}}}
+    标题: {{{title}}}
+    {{{summary}}}
