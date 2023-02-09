@@ -1,0 +1,9 @@
+name: 发送调试信息
+provider: pusher
+source:
+  service: pusher
+  channel: debug
+  type: echo
+tpl:
+  default: |-
+    {{msg}}

@@ -1,0 +1,11 @@
+name: 新帖子
+provider: pusher
+source:
+  service: pusher
+  channel: isekaibbs
+  type: newPost
+tpl:
+  default: |-
+    {{{postUser.displayname}}}「{{{postUser.username}}}」发布了帖子《{{{topic.titleRaw}}}》:
+    {{{excerpt post.content 100}}}
+    {{{topic.url}}}

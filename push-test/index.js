@@ -11,9 +11,6 @@ var pusher = new Pusher({
   cluster: config.service.pusher.cluster
 });
 
-pusher.trigger('isekai', 'newPage', {
-  author: "Hyperzlib",
-  title: "沙盒",
-  summary: "机器人应该可以用了",
-  url: "https://www.isekai.cn/ShaHe"
+pusher.trigger('debug', 'echo', {
+  msg: "推送系统应该已经好了"
 });

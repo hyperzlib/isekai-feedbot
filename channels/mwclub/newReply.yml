@@ -1,0 +1,11 @@
+name: 新回复
+provider: pusher
+source:
+  service: pusher
+  channel: mwclub
+  type: newReply
+tpl:
+  default: |-
+    {{postUser.displayname}}「@{{postUser.username}}」回复了 {{topicUser.displayname}}「@{{topicUser.username}}」的帖子《{{topic.titleRaw}}》:
+    {{Utils.excerpt(post.content, 100)}}
+    {{post.url}}
