@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "start-dev": "tsc && node index.js",
+    "dev": "tsc && node index.js",
     "build": "tsc"
   },
   "author": {
@@ -20,6 +20,7 @@
     "decoders": "^1.25.3",
     "handlebars": "^4.7.7",
     "koa": "^2.13.4",
+    "koa-body": "^6.0.1",
     "koa-router": "^10.1.1",
     "lua-runner": "^2.0.3",
     "micromatch": "^4.0.4",

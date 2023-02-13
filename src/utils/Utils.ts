@@ -10,7 +10,7 @@ export class Utils {
 
     static getCurrentDate(): string {
         let date = new Date();
-        return date.getFullYear() + '年' + date.getMonth() + '月' + date.getDate() + '日';
+        return date.getFullYear() + '年' + (date.getMonth() + 1) + '月' + date.getDate() + '日';
     }
 
     static count(dict: { [key: string]: any }): number {

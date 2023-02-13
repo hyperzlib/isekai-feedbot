@@ -1,7 +1,7 @@
 import App from "../App";
 import { Service } from "../ServiceManager";
 import Pusher, { Channel } from 'pusher-js';
-import { Utils } from "../Utils";
+import { Utils } from "../utils/Utils";
 
 export type PusherServiceConfig = {
     app_id: string;

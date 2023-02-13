@@ -1,5 +1,5 @@
 import Handlebars from "handlebars";
-import { Utils } from "./Utils";
+import { Utils } from "./utils/Utils";
 
 export class Setup {
     public static initHandlebars() {

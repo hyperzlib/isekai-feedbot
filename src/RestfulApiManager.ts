@@ -3,19 +3,22 @@ import Koa from 'koa';
 import { RestfulApiConfig } from "./Config";
 import Router from "koa-router";
 import { makeRoutes } from "./restful/routes";
+import koaBody from "koa-body";
 
 export interface RestfulContext {
-    app: App
+    feedbot: App,
+    request: Koa.Request,
 }
 
 export type FullRestfulContext = RestfulContext & Koa.BaseContext;
+export type RestfulRouter = Router<any, RestfulContext>;
 
 export class RestfulApiManager {
     private app: App;
     private config: RestfulApiConfig;
     
-    private koa: Koa;
-    private router: Router<any, RestfulContext>;
+    public koa: Koa;
+    public router: RestfulRouter;
 
     constructor(app: App, config: Pick<RestfulApiConfig, any>) {
         this.app = app;
@@ -32,13 +35,18 @@ export class RestfulApiManager {
 
     public initialize(): Promise<void> {
         makeRoutes(this.router, this, this.app);
-
+        
+        this.koa.use(koaBody());
         this.koa.use(this.globalMiddleware);
+
+        this.koa.on("error", (err, ctx) => {
+            console.error(err);
+        });
 
         return new Promise((resolve) => {
             this.koa.use(this.router.routes());
             this.koa.listen(this.config.port, () => {
-                console.log(`Restful API 启动于：${this.config.port}`);
+                console.log(`Restful API 启动于：http://${this.config.host}:${this.config.port}`);
                 resolve();
             });
         });
@@ -50,7 +58,7 @@ export class RestfulApiManager {
      * @param next 
      */
     public globalMiddleware = async (ctx: FullRestfulContext, next: () => Promise<any>) => {
-        ctx.app = this.app; // 注入全局app
+        ctx.feedbot = this.app; // 注入全局app
         await next();
     }
 
@@ -134,5 +142,9 @@ export class RestfulApiManager {
 
         }
         return false;
+    }
+
+    public getRobotRouter(robotId: string) {
+        return this.router.prefix('/' + robotId);
     }
 }

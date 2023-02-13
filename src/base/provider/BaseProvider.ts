@@ -42,7 +42,7 @@ export class BaseProvider {
      * 发送消息
      */
     sendMessage(messages: MultipleMessage) {
-        this.app.sendMessage(this.channelId, messages)
+        this.app.sendPushMessage(this.channelId, messages)
             .then(() => {})
             .catch((err) => {
                 this.error('无法发送消息', err);
@@ -53,7 +53,7 @@ export class BaseProvider {
      * 发送消息（异步）
      */
     sendMessageAsync(messages: MultipleMessage): Promise<void> {
-        return this.app.sendMessage(this.channelId, messages);
+        return this.app.sendPushMessage(this.channelId, messages);
     }
 
     /**

@@ -4,24 +4,30 @@ import path from "path";
 import App from "./App";
 import { MultipleMessage } from "./base/provider/BaseProvider";
 import { RobotConfig } from "./Config";
+import { CommonSendMessage } from "./message/Message";
+import { RestfulApiManager, RestfulContext, RestfulRouter } from "./RestfulApiManager";
 import { Target } from "./SubscribeManager";
 
 const ROBOT_PATH = __dirname + "/robot";
 
 export interface Robot {
-    initialize(): Promise<void>;
-    sendMessage(targets: Target[], message: string): Promise<void>;
-    baseId?: string;
+    type: string;
+    robotId?: string;
+    uid?: string;
+    initialize?: () => Promise<any>;
+    initRestfulApi?: (router: RestfulRouter, api: RestfulApiManager) => Promise<any>;
+    sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
+    sendPushMessage(targets: Target[], message: string): Promise<any>;
 }
 
 export class RobotManager {
     private app: App;
-    private config: { [key: string]: RobotConfig };
+    private config: Record<string, RobotConfig>;
 
-    private robotClasses: { [key: string]: any };
-    private robots: { [key: string]: Robot };
+    private robotClasses: Record<string, any>;
+    private robots: Record<string, Robot>;
 
-    constructor(app: App, config: { [key: string]: RobotConfig }) {
+    constructor(app: App, config: Record<string, RobotConfig>) {
         this.app = app;
         this.config = config;
 
@@ -59,7 +65,10 @@ export class RobotManager {
                 let robotClass = this.robotClasses[robotType];
                 try {
                     let robotObject: Robot = new robotClass(this.app, robotId, robotConfig);
-                    await robotObject.initialize();
+
+                    await robotObject.initialize?.();
+                    await robotObject.initRestfulApi?.(this.app.restfulApi.getRobotRouter(robotId), this.app.restfulApi);
+
                     this.robots[robotId] = robotObject;
                     console.log(`已加载Robot: ${robotId}`);
                 } catch(err) {
@@ -71,15 +80,15 @@ export class RobotManager {
         }
     }
     
-    public async sendMessage(channelId: string, messages: MultipleMessage) {
+    public async sendPushMessage(channelId: string, messages: MultipleMessage) {
         for (let robotId in this.robots) {
             let robot = this.robots[robotId];
-            let baseId = robot.baseId;
+            let robotType = robot.type;
             let currentMsg: string | null = null;
             if (robotId in messages) {
                 currentMsg = messages[robotId];
-            } else if (baseId && baseId in messages) {
-                currentMsg = messages[baseId];
+            } else if (robotType && robotType in messages) {
+                currentMsg = messages[robotType];
             } else if ("base" in messages) {
                 currentMsg = messages["base"];
             }
@@ -93,7 +102,7 @@ export class RobotManager {
             }
 
             try {
-                await robot.sendMessage(targets, currentMsg);
+                await robot.sendPushMessage(targets, currentMsg);
             } catch(err) {
                 console.error(`[${channelId}] 无法发送消息到 ${robotId} : `, err);
             }

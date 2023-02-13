@@ -1,8 +1,9 @@
 import TelegramBot from "node-telegram-bot-api";
 import App from "../App";
+import { CommonSendMessage } from "../message/Message";
 import { Robot } from "../RobotManager";
 import { Target } from "../SubscribeManager";
-import { Utils } from "../Utils";
+import { Utils } from "../utils/Utils";
 
 export type TelegramRobotConfig = {
     token: string;
@@ -11,13 +12,14 @@ export type TelegramRobotConfig = {
 }
 
 export default class TelegramRobot implements Robot {
-    private robotId: string;
-    bot: TelegramBot;
-    baseId?: string | undefined;
+    public type = 'telegram';
+    public robotId: string;
+    public uid?: string;
+
+    private bot: TelegramBot;
 
     constructor(app: App, robotId: string, config: TelegramRobotConfig) {
         this.robotId = robotId;
-        this.baseId = config.baseId;
 
         let botOptions: any = {
             polling: true
@@ -70,11 +72,19 @@ export default class TelegramRobot implements Robot {
     }
 
     /**
+     * 发送消息
+     * @param message 
+     */
+    async sendMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
+        return message;
+    }
+
+    /**
      * 发送机器人消息
      * @param targets 发送目标
      * @param message 消息内容
      */
-    async sendMessage(targets: Target[], message: string): Promise<void> {
+    async sendPushMessage(targets: Target[], message: string): Promise<void> {
         let chatIdList: number[] = [];
         for (let target of targets) {
             chatIdList.push(parseInt(target.identity));

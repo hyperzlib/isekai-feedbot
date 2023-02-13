@@ -5,6 +5,8 @@ import { BaseProvider, MultipleMessage } from './base/provider/BaseProvider';
 
 import { ChannelManager } from './ChannelManager';
 import { ChannelConfig, Config } from './Config';
+import { EventManager } from './EventManager';
+import { CommonSendMessage } from './message/Message';
 import { ProviderManager } from './ProviderManager';
 import { RestfulApiManager } from './RestfulApiManager';
 import { RobotManager } from './RobotManager';
@@ -16,6 +18,7 @@ export default class App {
     public config: Config;
     public srcPath: string = __dirname;
 
+    public event!: EventManager;
     public robot!: RobotManager;
     public provider!: ProviderManager;
     public service!: ServiceManager;
@@ -30,6 +33,8 @@ export default class App {
 
     async initialize() {
         await this.initModules();
+        await this.initRestfulApiManager();
+        await this.initEventManager();
         await this.initRobot();
         await this.initProviderManager();
         await this.initServiceManager();
@@ -40,6 +45,16 @@ export default class App {
 
     async initModules() {
         await Setup.initHandlebars();
+    }
+
+    async initRestfulApiManager() {
+        this.restfulApi = new RestfulApiManager(this, this.config.http_api);
+        await this.restfulApi.initialize();
+    }
+
+    async initEventManager() {
+        this.event = new EventManager(this);
+        await this.event.initialize();
     }
 
     async initRobot() {
@@ -79,11 +94,6 @@ export default class App {
         await this.channel.initialize();
     }
 
-    async initRestfulApiManager() {
-        this.restfulApi = new RestfulApiManager(this, this.config.http_api);
-        await this.restfulApi.initialize();
-    }
-
     /**
      * 获取服务
      * @param serviceName 
@@ -102,14 +112,22 @@ export default class App {
     }
 
     /**
-     * 发送消息
+     * 发送推送消息
      * @param channelId Channel ID
      * @param messages 消息内容
      * @returns
      */
-    async sendMessage(channelId: string, messages: MultipleMessage): Promise<void> {
+    async sendPushMessage(channelId: string, messages: MultipleMessage): Promise<void> {
         console.log(`[${channelId}] 消息: `, messages);
-        this.robot.sendMessage(channelId, messages);
+        this.robot.sendPushMessage(channelId, messages);
+    }
+
+    /**
+     * 发送消息
+     * @param message 
+     */
+    async sendMessage(message: CommonSendMessage) {
+        
     }
 
     require(file: string): any {
