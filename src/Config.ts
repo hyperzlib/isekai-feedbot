@@ -3,6 +3,7 @@ import { RegexFilterConfig } from "./generator/RegexFilter";
 
 export type Config = {
     channel_config_path: string;
+    plugin_path: string;
     subscribe_config: string;
     debug: boolean;
     robot: { [key: string]: RobotConfig };

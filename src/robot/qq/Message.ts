@@ -1,6 +1,6 @@
 import { CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage, MentionMessage, MessageChunk, TextMessage } from "../../message/Message";
 import { GroupSender, UserSender } from "../../message/Sender";
-import { QQGroupInfo } from "../QQRobot";
+import QQRobot, { QQGroupInfo } from "../QQRobot";
 
 export interface QQFaceMessage extends MessageChunk {
     type: 'qqface';
@@ -66,7 +66,7 @@ export class QQGroupSender extends GroupSender {
  * @param message 
  * @returns 
  */
-export async function parseQQMessageChunk(messageData: any[], message: CommonReceivedMessage): Promise<CommonReceivedMessage> {
+export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], message: CommonReceivedMessage): Promise<CommonReceivedMessage> {
     let willIgnoreMention = false;
     messageData.forEach((chunkData) => {
         if (chunkData.type) {
@@ -110,13 +110,17 @@ export async function parseQQMessageChunk(messageData: any[], message: CommonRec
                 case 'at':
                     if (chunkData.data?.qq) {
                         if (!willIgnoreMention) {
-                            message.mention(chunkData.data.qq);
-                            message.content.push({
-                                type: 'mention',
-                                data: {
-                                    uid: chunkData.data.qq
-                                }
-                            } as MentionMessage);
+                            if (chunkData.data.qq == bot.uid) { // 如果是@机器人
+                                message.mentionedReceiver = true;
+                            } else { // @其他人的情况
+                                message.mention(chunkData.data.qq);
+                                message.content.push({
+                                    type: 'mention',
+                                    data: {
+                                        uid: chunkData.data.qq
+                                    }
+                                } as MentionMessage);
+                            }
                         } else {
                             willIgnoreMention = false;
                         }
@@ -124,7 +128,7 @@ export async function parseQQMessageChunk(messageData: any[], message: CommonRec
                     break;
                 case 'reply':
                     if (chunkData.data?.id) {
-                        message.replyId = chunkData.data.id;
+                        message.repliedId = chunkData.data.id;
                         willIgnoreMention = true; // 忽略下一个“@”
                     }
                     break;
@@ -164,7 +168,7 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
                 msgChunk.push({
                     type: 'text',
                     data: {
-                        url: chunk.data.url
+                        text: chunk.data.text
                     }
                 });
                 break;
@@ -204,10 +208,27 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
         }
     })
 
-    if (message.replyId) {
+    if (message.repliedId) {
+        if (message.origin === 'group' && message.repliedMessage?.sender.uid) {
+            // 目前不知道为何，@不能正常传递
+            /*
+            msgChunk.unshift({
+                type: 'text',
+                data: { text: ' ' }
+            });
+            msgChunk.unshift({
+                type: 'at',
+                data: { qq: message.repliedMessage.sender.uid }
+            });
+            msgChunk.unshift({
+                type: 'text',
+                data: { text: ' ' }
+            });
+            */
+        }
         msgChunk.unshift({
             type: 'reply',
-            data: { id: message.replyId }
+            data: { id: message.repliedId }
         });
     }
 

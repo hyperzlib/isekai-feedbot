@@ -1,6 +1,7 @@
 import TelegramBot from "node-telegram-bot-api";
 import App from "../App";
 import { CommonSendMessage } from "../message/Message";
+import { CommandInfo } from "../PluginManager";
 import { Robot } from "../RobotManager";
 import { Target } from "../SubscribeManager";
 import { Utils } from "../utils/Utils";
@@ -54,6 +55,19 @@ export default class TelegramRobot implements Robot {
             const chatId = message.chat.id;
             this.bot.sendMessage(chatId, '当前会话ID：' + chatId);
         });
+    }
+
+    async setCommands(commands: CommandInfo[]) {
+        /*
+        let botCommands: TelegramBot.BotCommand[] = [];
+        for (let command of commands) {
+            botCommands.push({
+                command: command.command,
+                description: command.help ?? command.name
+            });
+        }
+        await this.bot.setMyCommands(botCommands);
+        */
     }
 
     /**

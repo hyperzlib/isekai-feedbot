@@ -12,8 +12,6 @@ import { ChannelConfig } from './Config';
 export class ChannelManager extends EventEmitter {
     private app: App;
     private channelPath: string;
-    private loadChannelCallback: (file: string) => any;
-    private removeChannelCallback: (file: string) => any;
     private setLoading?: debounce<Function>;
     private watcher!: chokidar.FSWatcher;
     
@@ -27,9 +25,6 @@ export class ChannelManager extends EventEmitter {
         this.channelPath = channelPath;
         this.channels = {};
         this.channelName = {};
-
-        this.loadChannelCallback = this.loadChannel.bind(this);
-        this.removeChannelCallback = this.removeChannel.bind(this);
     }
 
     /**
@@ -42,9 +37,9 @@ export class ChannelManager extends EventEmitter {
             persistent: true
         });
 
-        this.watcher.on('add', this.loadChannelCallback);
-        this.watcher.on('change', this.loadChannelCallback);
-        this.watcher.on('unlink', this.removeChannelCallback);
+        this.watcher.on('add', this.loadChannel.bind(this));
+        this.watcher.on('change', this.loadChannel.bind(this));
+        this.watcher.on('unlink', this.loadChannel.bind(this));
     }
 
     /**

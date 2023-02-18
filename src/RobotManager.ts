@@ -5,6 +5,7 @@ import App from "./App";
 import { MultipleMessage } from "./base/provider/BaseProvider";
 import { RobotConfig } from "./Config";
 import { CommonSendMessage } from "./message/Message";
+import { CommandInfo } from "./PluginManager";
 import { RestfulApiManager, RestfulContext, RestfulRouter } from "./RestfulApiManager";
 import { Target } from "./SubscribeManager";
 
@@ -16,6 +17,7 @@ export interface Robot {
     uid?: string;
     initialize?: () => Promise<any>;
     initRestfulApi?: (router: RestfulRouter, api: RestfulApiManager) => Promise<any>;
+    setCommands?(commands: CommandInfo[]): Promise<any>;
     sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
     sendPushMessage(targets: Target[], message: string): Promise<any>;
 }
@@ -38,9 +40,9 @@ export class RobotManager {
     async initialize() {
         for (let file of fs.readdirSync(ROBOT_PATH)) {
             let robotFile = `${ROBOT_PATH}/${file}`;
-            if (robotFile.match(/\.(js|mjs)$/)) {
+            if (robotFile.match(/\.m?js$/)) {
                 // 加载js文件
-                let robotName = path.basename(robotFile).replace(/Robot\.(js|mjs)$/gi, "").toLocaleLowerCase();
+                let robotName = path.basename(robotFile).replace(/Robot\.m?js$/gi, "").toLocaleLowerCase();
                 try {
                     let robotClass = require(robotFile)?.default;
                     if (!robotClass) {

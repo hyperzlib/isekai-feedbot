@@ -7,6 +7,7 @@ import { ChannelManager } from './ChannelManager';
 import { ChannelConfig, Config } from './Config';
 import { EventManager } from './EventManager';
 import { CommonSendMessage } from './message/Message';
+import { PluginManager } from './PluginManager';
 import { ProviderManager } from './ProviderManager';
 import { RestfulApiManager } from './RestfulApiManager';
 import { RobotManager } from './RobotManager';
@@ -24,6 +25,7 @@ export default class App {
     public service!: ServiceManager;
     public subscribe!: SubscribeManager;
     public channel!: ChannelManager;
+    public plugin!: PluginManager;
     public restfulApi!: RestfulApiManager;
 
     constructor(configFile: string) {
@@ -40,6 +42,7 @@ export default class App {
         await this.initServiceManager();
         await this.initSubscribeManager();
         await this.initChannelManager();
+        await this.initPluginManager();
         console.log('初始化完成，正在接收消息');
     }
 
@@ -77,10 +80,6 @@ export default class App {
         await this.subscribe.initialize();
     }
 
-    async initCommandManager() {
-
-    }
-
     async initChannelManager() {
         this.channel = new ChannelManager(this, this.config.channel_config_path);
 
@@ -94,9 +93,14 @@ export default class App {
         await this.channel.initialize();
     }
 
+    async initPluginManager() {
+        this.plugin = new PluginManager(this, this.config.plugin_path);
+        await this.plugin.initialize();
+    }
+
     /**
      * 获取服务
-     * @param serviceName 
+     * @param serviceName 服务名称
      * @returns
      */
     getService<T extends Service>(serviceName: string): T {
@@ -120,14 +124,6 @@ export default class App {
     async sendPushMessage(channelId: string, messages: MultipleMessage): Promise<void> {
         console.log(`[${channelId}] 消息: `, messages);
         this.robot.sendPushMessage(channelId, messages);
-    }
-
-    /**
-     * 发送消息
-     * @param message 
-     */
-    async sendMessage(message: CommonSendMessage) {
-        
     }
 
     require(file: string): any {

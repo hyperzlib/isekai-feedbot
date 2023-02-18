@@ -59,9 +59,26 @@ export class CommonMessage {
     type: string | CommonMessageType = "text";
     origin: string | CommonMessageOrigin = "private";
     /** 回复的消息ID */
-    replyId?: string;
+    repliedId?: string;
     /** 提到的人 */
     mentions?: { uid: string, text?: string }[];
+
+    private _contentText?: string;
+
+    public get contentText() {
+        if (typeof this._contentText === 'undefined') {
+            this._contentText = this.content.map((chunk) => {
+                if (chunk.type === 'text') {
+                    return chunk.data.text;
+                } else if (chunk.type === 'mention') {
+                    return '[@' + (chunk.data.text || chunk.data.uid) + ']';
+                } else {
+                    return JSON.stringify([chunk.type, chunk.data]);
+                }
+            }).join('').trim();
+        }
+        return this._contentText;
+    }
 
     /**
      * 提到某人
@@ -113,29 +130,99 @@ export class CommonMessage {
             return true;
         }
     }
+
+    /** 
+     * 合并文本消息
+     * @returns
+     */
+    public combineText() {
+        let newContent: MessageChunk[] = [];
+        let lastText: string | undefined;
+
+        this.content.forEach((chunk) => {
+            if (chunk.type === 'text') {
+                if (!lastText) {
+                    lastText = chunk.data.text;
+                } else {
+                    lastText += chunk.data.text;
+                }
+            } else {
+                if (lastText) {
+                    newContent.push({
+                        type: 'text',
+                        data: { text: lastText }
+                    });
+                    lastText = undefined;
+                }
+                newContent.push(chunk);
+            }
+        });
+
+        if (lastText) {
+            newContent.push({
+                type: 'text',
+                data: { text: lastText }
+            });
+        }
+        
+        this.content = newContent;
+    }
+
+    /**
+     * 替换消息内容
+     * @param content 
+     * @param searchValue 
+     * @param replaceValue 
+     * @returns 
+     */
+    public static replace(content: MessageChunk[], searchValue: RegExp, replaceValue: string) {
+        return content.map((chunk, index) => {
+            if (chunk.type === 'text') {
+                let newText: string = chunk.data.text;
+                let offset = [0, 0];
+                if (index === 0) {
+                    offset[0] = 1;
+                    newText = "\t" + newText;
+                } else if (index === content.length - 1) {
+                    offset[1] = 1;
+                    newText += "\t";
+                }
+                newText = newText.replace(searchValue, replaceValue);
+                chunk.data.text = newText.substring(offset[0], newText.length - offset[1]);
+            }
+            return chunk;
+        });
+    }
 }
 
 /** 基本发送的消息 */
 export class CommonSendMessage extends CommonMessage {
+    /** 发送者 */
     sender: Robot;
+    /** 接收方的ID */
     targetId: string;
 
-    constructor(sender: Robot, targetType: string, targetId: string, content?: MessageChunk[]) {
+    /** 回复的消息 */
+    repliedMessage?: CommonReceivedMessage;
+
+    constructor(sender: Robot, origin: string, targetId: string, content?: MessageChunk[]) {
         super();
         this.sender = sender;
-        this.type = targetType;
+        this.origin = origin;
         this.targetId = targetId;
         if (Array.isArray(content)) this.content = content;
     }
 }
 
 export class CommonReceivedMessage extends CommonMessage {
-    // 接收时间
+    /** 接收时间 */
     time: Date = new Date();
-    // 接收者
+    /** 接收者 */
     receiver: Robot;
-    // 发送者
+    /** 发送者 */
     sender: any;
+    /** 接收者是否被提到 */
+    mentionedReceiver: boolean = false;
 
     constructor(receiver: Robot, messageId?: string) {
         super();
@@ -146,7 +233,7 @@ export class CommonReceivedMessage extends CommonMessage {
 
     public async sendReply(message: string | MessageChunk[], addReply: boolean = false): Promise<CommonSendMessage | null> {
         const sender = this.sender as BaseSender;
-        let newMessage = new CommonSendMessage(this.receiver!, sender.type, sender.targetId);
+        let newMessage = new CommonSendMessage(this.receiver!, this.origin, sender.targetId);
         if (typeof message === 'string') {
             let msgContent: MessageChunk[] = [{
                 type: 'text',
@@ -159,6 +246,11 @@ export class CommonReceivedMessage extends CommonMessage {
             return null;
         }
 
+        if (addReply) {
+            newMessage.repliedId = this.id;
+            newMessage.repliedMessage = this;
+        }
+
         newMessage = await this.receiver.sendMessage(newMessage);
 
         return newMessage;
@@ -166,7 +258,8 @@ export class CommonReceivedMessage extends CommonMessage {
 }
 
 export class CommonPrivateMessage<US extends UserSender> extends CommonReceivedMessage {
-    sender: US;
+    public sender: US;
+    public origin = 'private';
 
     constructor(sender: US, receiver: Robot, messageId?: string) {
         super(receiver, messageId);
@@ -176,6 +269,7 @@ export class CommonPrivateMessage<US extends UserSender> extends CommonReceivedM
 
 export class CommonGroupMessage<GS extends GroupSender = GroupSender> extends CommonReceivedMessage {
     sender: GS;
+    public origin = 'group';
 
     constructor(sender: GS, receiver: Robot, messageId?: string) {
         super(receiver, messageId);

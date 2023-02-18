@@ -11,7 +11,7 @@ import { CommonReceivedMessage, CommonSendMessage, MentionMessage, TextMessage }
 export type QQRobotConfig = {
     user: string;
     host: string;
-    baseId?: string;
+    command_prefix?: string;
 }
 
 export type QQGroupInfo = {
@@ -27,6 +27,8 @@ export default class QQRobot implements Robot {
     public uid: string;
     public robotId: string;
 
+    public commandPrefix: string[] = ['/', '！', '!', '／'];
+
     private app: App;
     private endpoint: string;
 
@@ -39,6 +41,14 @@ export default class QQRobot implements Robot {
         this.robotId = robotId;
         this.endpoint = 'http://' + config.host;
         this.uid = config.user;
+
+        if (config.command_prefix) {
+            if (Array.isArray(config.command_prefix)) {
+                this.commandPrefix = config.command_prefix;
+            } else if (typeof config.command_prefix === 'string') {
+                this.commandPrefix = [config.command_prefix];
+            }
+        }
     }
 
     async initialize() {
@@ -66,7 +76,7 @@ export default class QQRobot implements Robot {
     }
 
     async initRestfulApi(router: RestfulRouter, api: RestfulApiManager) {
-        api.router.post(`/event`, this.handlePostEvent.bind(this));
+        router.post(`/event`, this.handlePostEvent.bind(this));
     }
 
     async handlePostEvent(ctx: FullRestfulContext, next: koa.Next) {
@@ -88,12 +98,19 @@ export default class QQRobot implements Robot {
      * @param postData 
      */
     async handleMessage(postData: any) {
+        let isResolved = false;
+        if (postData.type) {
+            isResolved = await this.app.event.emitRawEvent(this, postData.type, postData);
+            if (isResolved) return;
+        }
+
         if (postData.message_id) {
+            let message: QQGroupMessage | QQPrivateMessage | undefined;
             if (postData.message_type === 'group') {
                 // 处理群消息
                 let groupInfo = this.groupList.find((info) => info.groupId === postData.group_id);
 
-                let groupSender = new QQGroupSender(postData.group_id, postData.user_id);
+                let groupSender = new QQGroupSender(postData.group_id.toString(), postData.user_id.toString());
                 groupSender.groupInfo = groupInfo;
                 groupSender.groupName = groupInfo?.groupName;
                 groupSender.globalNickName = postData.sender?.nickname;
@@ -102,21 +119,49 @@ export default class QQRobot implements Robot {
                 groupSender.level = postData.sender?.level;
                 groupSender.title = postData.sender?.title;
 
-                let message = new QQGroupMessage(groupSender, this, postData.message_id.toString());
+                message = new QQGroupMessage(groupSender, this, postData.message_id.toString());
                 message.time = new Date(postData.time * 1000);
 
-                message = await parseQQMessageChunk(postData.message ?? [], message);
+                message = await parseQQMessageChunk(this, postData.message ?? [], message);
             } else if (postData.message_type === 'private') {
                 // 处理私聊消息
-                let userSender = new QQUserSender(postData.user_id);
+                let userSender = new QQUserSender(postData.user_id.toString());
                 userSender.nickName = postData.sender?.nickname;
 
-                let message = new QQPrivateMessage(userSender, this, postData.message_id.toString());
+                message = new QQPrivateMessage(userSender, this, postData.message_id.toString());
                 message.time = new Date(postData.time * 1000);
 
-                message = await parseQQMessageChunk(postData.message ?? [], message);
+                message = await parseQQMessageChunk(this, postData.message ?? [], message);
+            }
+
+            if (message) {
+                // 处理原始消息
+                isResolved = await this.app.event.emitRawMessage(message);
+                if (isResolved) return;
+
+                // 处理指令
+                let commandInfo = this.getCommandInfo(message);
+                if (commandInfo) {
+                    isResolved = await this.app.event.emitCommand(commandInfo.name, commandInfo.args, message);
+                    if (isResolved) return;
+                }
+
+                // 处理消息
+                isResolved = await this.app.event.emitMessage(message);
+                if (isResolved) return;
             }
         }
+    }
+
+    getCommandInfo(message: CommonReceivedMessage) {
+        for (let prefix of this.commandPrefix) {
+            if (message.contentText.startsWith(prefix)) {
+                let name = message.contentText.substring(prefix.length).split(' ')[0];
+                let args = message.contentText.substring(prefix.length + name.length + 1);
+                return { name, args };
+            }
+        }
+        return null;
     }
 
     /**
@@ -168,6 +213,7 @@ export default class QQRobot implements Robot {
         if (message.origin === 'private') {
             await this.sendToUser(message.targetId, msgData);
         } else if (message.origin === 'group') {
+            console.log('发送群消息', message.targetId, msgData);
             await this.sendToGroup(message.targetId, msgData);
         }
 
