@@ -6,9 +6,11 @@ export type Config = {
     plugin_path: string;
     subscribe_config: string;
     debug: boolean;
-    robot: { [key: string]: RobotConfig };
-    service: { [key: string]: ServiceConfig };
+    robot: Record<string, RobotConfig>;
+    service: Record<string, ServiceConfig>;
     http_api: RestfulApiConfig;
+    command_override: CommandOverrideConfig;
+    focused_as_command: true;
 };
 
 export type RobotConfig = {
@@ -30,4 +32,12 @@ export type GeneratorConfig = {
     json: JsonFilterConfig;
     match: RegexFilterConfig;
     tpl: any;
+};
+
+export type CommandOverrideConfig = {
+    [command: string]: {
+        name?: string;
+        help?: string;
+        alias?: string[];
+    }
 };

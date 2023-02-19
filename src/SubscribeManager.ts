@@ -9,27 +9,31 @@ export interface Target {
     identity: string;
 }
 
+export type SubscribeConfig = {
+    [robotId: string]: {
+        [targetType: string]: {
+            [targetIdentity: string]: {
+                [sourceType: string]: string[]
+            }
+        }
+    }
+}
+
 /**
  * 订阅管理
- * @todo 取消通配符支持，仅支持订阅单频道和频道组下的单层频道
  */
 export class SubscribeManager {
     private app: App;
     private subscribeFile: string;
     private watcher!: chokidar.FSWatcher;
+    
     private subscribeList: {
-        [channelId: string]: {
+        [sourceId: string]: {
             [robotId: string]: Target[]
         }
     };
 
-    private subscribeConfig: {
-        [robotId: string]: {
-            [targetType: string]: {
-                [targetIdentity: string]: string[]
-            }
-        }
-    };
+    private subscribeConfig: SubscribeConfig;
 
     constructor(app: App, subscribeFile: string) {
         this.app = app;
@@ -76,8 +80,15 @@ export class SubscribeManager {
                 let targetTypeConf = targetConf[targetType];
                 for (let targetId in targetTypeConf) {
                     let subscribeList = targetTypeConf[targetId];
-                    for (let channelId of subscribeList) {
-                        this.addSubscribe(robotId, targetType, targetId, channelId);
+                    if (subscribeList.channel) {
+                        for (let sourceId in subscribeList.channel) {
+                            this.addSubscribe(robotId, targetType, targetId, 'channel:' + sourceId);
+                        }
+                    }
+                    if (subscribeList.controller) {
+                        for (let controllerId in subscribeList.controller) {
+                            this.addSubscribe(robotId, targetType, targetId, 'controller:' + controllerId);
+                        }
                     }
                 }
             }
@@ -87,15 +98,15 @@ export class SubscribeManager {
     /**
      * 初始化订阅树
      * @param robotId 
-     * @param channelId 
+     * @param sourceId 
      */
-    public prepareTree(robotId: string, channelId: string) {
-        if (!(channelId in this.subscribeList)) {
-            this.subscribeList[channelId] = {};
+    public prepareTree(robotId: string, sourceId: string) {
+        if (!(sourceId in this.subscribeList)) {
+            this.subscribeList[sourceId] = {};
         }
 
-        if (!(robotId in this.subscribeList[channelId])) {
-            this.subscribeList[channelId][robotId] = [];
+        if (!(robotId in this.subscribeList[sourceId])) {
+            this.subscribeList[sourceId][robotId] = [];
         }
     }
 
@@ -104,11 +115,11 @@ export class SubscribeManager {
      * @param robotId 机器人ID
      * @param targetType 目标类型
      * @param targetId 目标ID
-     * @param channelId 频道ID
+     * @param sourceId 订阅源ID
      */
-    public addSubscribe(robotId: string, targetType: string, targetId: string, channelId: string) {
-        this.prepareTree(robotId, channelId);
-        this.subscribeList[channelId][robotId].push({
+    public addSubscribe(robotId: string, targetType: string, targetId: string, sourceId: string) {
+        this.prepareTree(robotId, sourceId);
+        this.subscribeList[sourceId][robotId].push({
             type: targetType,
             identity: targetId
         });
@@ -119,47 +130,32 @@ export class SubscribeManager {
      * @param robotId 机器人ID
      * @param targetType 目标类型
      * @param targetId 目标ID
-     * @param channelId 频道ID
+     * @param sourceId 订阅源ID
      */
-    public removeSubscribe(robotId: string, targetType: string, targetId: string, channelId: string) {
-        if (this.subscribeList?.[channelId]?.[robotId]) {
-            this.subscribeList[channelId][robotId] = this.subscribeList[channelId][robotId].filter((target) => {
+    public removeSubscribe(robotId: string, targetType: string, targetId: string, sourceId: string) {
+        if (this.subscribeList?.[sourceId]?.[robotId]) {
+            this.subscribeList[sourceId][robotId] = this.subscribeList[sourceId][robotId].filter((target) => {
                 return (target.type !== targetType || targetId != targetId);
             });
         }
     }
 
     /**
-     * 添加频道并更新订阅列表
-     * @param channelId 频道ID
-     */
-    public addChannel(channelId: string) {
-        
-    }
-    
-    /**
-     * 移除频道并更新订阅列表
-     * @param channelId 频道ID
-     */
-    public removeChannel(channelId: string) {
-        
-    }
-
-    /**
-     * 获取频道订阅者
-     * @param channelId 频道ID
+     * 获取订阅者
+     * @param sourceId 订阅源ID
      * @param robotId 机器人ID
      * @returns 
      */
-    public getSubscriber(channelId: string, robotId: string): Target[] | null {
+    public getSubscriber(sourceId: string, robotId: string): Target[] | null {
         let subscribers: Target[] = [];
-        // 先获取频道本身的订阅
-        if (this.subscribeList?.[channelId]?.[robotId]) {
-            subscribers.push(...this.subscribeList[channelId][robotId]);
+        // 获取订阅
+        if (this.subscribeList?.[sourceId]?.[robotId]) {
+            subscribers.push(...this.subscribeList[sourceId][robotId]);
         }
-        // 获取父级（频道组）的订阅
-        if (channelId.includes('/')) {
-            let channelGroupPath = channelId.substring(0, channelId.lastIndexOf('/'));
+
+        if (sourceId.startsWith('channel:') && sourceId.includes('/')) {
+            // 获取父级（频道组）的订阅
+            let channelGroupPath = sourceId.substring(0, sourceId.lastIndexOf('/'));
             if (this.subscribeList?.[channelGroupPath]?.[robotId]) {
                 subscribers.push(...this.subscribeList[channelGroupPath][robotId]);
             }
@@ -170,5 +166,9 @@ export class SubscribeManager {
         } else {
             return null;
         }
+    }
+
+    public getSubscribedList(robotId: string, targetType: string, targetId: string, sourceType: string): string[] {
+        return this.subscribeConfig?.[robotId]?.[targetType]?.[targetId]?.[sourceType] ?? [];
     }
 }

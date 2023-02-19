@@ -63,6 +63,9 @@ export class CommonMessage {
     /** 提到的人 */
     mentions?: { uid: string, text?: string }[];
 
+    /** 附加信息 */
+    extra: any = {};
+
     private _contentText?: string;
 
     public get contentText() {

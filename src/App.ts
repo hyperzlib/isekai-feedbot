@@ -19,6 +19,8 @@ export default class App {
     public config: Config;
     public srcPath: string = __dirname;
 
+    public debug: boolean = false;
+
     public event!: EventManager;
     public robot!: RobotManager;
     public provider!: ProviderManager;
@@ -30,6 +32,8 @@ export default class App {
 
     constructor(configFile: string) {
         this.config = Yaml.parse(fs.readFileSync(configFile, { encoding: 'utf-8' }));
+        this.debug = this.config.debug;
+        
         this.initialize();
     }
 
@@ -83,13 +87,6 @@ export default class App {
     async initChannelManager() {
         this.channel = new ChannelManager(this, this.config.channel_config_path);
 
-        this.channel.on('add', (channelId) => {
-            this.subscribe.addChannel(channelId);
-        });
-        this.channel.on('remove', (channelId) => {
-            this.subscribe.removeChannel(channelId);
-        });
-
         await this.channel.initialize();
     }
 
@@ -111,8 +108,8 @@ export default class App {
         return this.provider.create(provider, channelId, config);
     }
 
-    getSubscriber(channelId: string, robotId: string): Target[] | null {
-        return this.subscribe.getSubscriber(channelId, robotId);
+    getChannelSubscriber(channelId: string, robotId: string): Target[] | null {
+        return this.subscribe.getSubscriber('channel:' + channelId, robotId);
     }
 
     /**

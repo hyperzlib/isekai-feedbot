@@ -140,10 +140,10 @@ export default class QQRobot implements Robot {
                 if (isResolved) return;
 
                 // 处理指令
-                let commandInfo = this.getCommandInfo(message);
-                if (commandInfo) {
-                    isResolved = await this.app.event.emitCommand(commandInfo.name, commandInfo.args, message);
-                    if (isResolved) return;
+                let commandText = this.getCommandContentText(message);
+                if (commandText) {
+                    await this.app.event.emitCommand(commandText, message);
+                    return;
                 }
 
                 // 处理消息
@@ -153,12 +153,10 @@ export default class QQRobot implements Robot {
         }
     }
 
-    getCommandInfo(message: CommonReceivedMessage) {
+    getCommandContentText(message: CommonReceivedMessage) {
         for (let prefix of this.commandPrefix) {
             if (message.contentText.startsWith(prefix)) {
-                let name = message.contentText.substring(prefix.length).split(' ')[0];
-                let args = message.contentText.substring(prefix.length + name.length + 1);
-                return { name, args };
+                return message.contentText.substring(prefix.length);
             }
         }
         return null;
@@ -211,9 +209,12 @@ export default class QQRobot implements Robot {
         let msgData = await convertMessageToQQChunk(message);
 
         if (message.origin === 'private') {
+            if (this.app.debug) console.log('[DEBUG] 发送私聊消息', message.targetId, msgData);
+            
             await this.sendToUser(message.targetId, msgData);
         } else if (message.origin === 'group') {
-            console.log('发送群消息', message.targetId, msgData);
+            if (this.app.debug) console.log('[DEBUG] 发送群消息', message.targetId, msgData);
+            
             await this.sendToGroup(message.targetId, msgData);
         }
 

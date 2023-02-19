@@ -1,15 +1,17 @@
 import { CommonReceivedMessage } from "../message/Message";
-import { PluginController } from "../PluginManager";
+import { PluginController, PluginEvent } from "../PluginManager";
 
-export default class EchoController extends PluginController {
+export default class EchoController implements PluginController {
+    public event!: PluginEvent;
+
     public id = 'echo';
     public name = '复读机';
     public description = '友好地复读消息';
-    
-    public autoSubscribe = true;
 
     public async initialize(): Promise<void> {
-        this.on("message/focused", this.handleEcho);
+        this.event.autoSubscribe = true;
+
+        this.event.on("message/focused", this.handleEcho);
     }
 
     private async handleEcho(message: CommonReceivedMessage, resolved: CallableFunction) {

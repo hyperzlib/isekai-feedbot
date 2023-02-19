@@ -98,7 +98,7 @@ export class RobotManager {
                 continue;
             }
 
-            let targets = this.app.getSubscriber(channelId, robotId);
+            let targets = this.app.getChannelSubscriber(channelId, robotId);
             if (!targets) {
                 continue;
             }

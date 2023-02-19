@@ -89,7 +89,7 @@ export class PluginManager extends EventEmitter {
     }
 
     async loadController(file: string) {
-        if (!file.match(/\.m?js$/)) return;
+        if (!file.match(/Controller\.m?js$/)) return;
 
         let moduleName = path.resolve(file).replace(/\\/g, '/').replace(/\.m?js$/, '');
         
@@ -97,7 +97,7 @@ export class PluginManager extends EventEmitter {
             const controller = await import(moduleName);
             if (controller) {
                 const controllerClass = controller.default ?? controller;
-                const controllerInstance: PluginController = new controllerClass(this.app, this.app.event);
+                const controllerInstance: PluginController = new controllerClass(this.app);
                 if (controllerInstance.id && controllerInstance.id !== '') {
                     const controllerId = controllerInstance.id;
 
@@ -118,6 +118,8 @@ export class PluginManager extends EventEmitter {
                         this.emit('controllerLoaded', controllerInstance);
                     }
 
+                    const pluginMisc = new PluginEvent(this.app.event);
+                    controllerInstance.event = pluginMisc;
                     await controllerInstance.initialize();
                 } else {
                     throw new Error('PluginController ID is not defined.');
@@ -134,7 +136,8 @@ export class PluginManager extends EventEmitter {
     async removeController(file: string, isReload = false) {
         const controller = this.fileControllers[file];
         if (controller) {
-            await controller.destroy();
+            await controller.event.destroy();
+            await controller.destroy?.();
             
             delete this.controllers[file];
             delete this.fileControllers[file];
@@ -147,13 +150,21 @@ export class PluginManager extends EventEmitter {
     }
 }
 
-export class PluginController {
-    public id: string = '';
-    public name: string = '未命名功能';
-    public description: string = '';
+export interface PluginController {
+    id: string;
+    name: string;
+    description?: string;
 
-    private app: App;
+    event: PluginEvent;
+
+    initialize: () => Promise<void>;
+    destroy?: () => Promise<void>;
+}
+
+export class PluginEvent {
     private eventManager: EventManager;
+
+    public controller?: PluginController;
 
     public autoSubscribe = false;
     public forceSubscribe = false;
@@ -168,8 +179,7 @@ export class PluginController {
     private commandList: CommandInfo[] = [];
     private eventList: Record<string, EventListenerInfo[]> = {};
 
-    constructor(app: App, eventManager: EventManager) {
-        this.app = app;
+    constructor(eventManager: EventManager) {
         this.eventManager = eventManager;
     }
 
@@ -204,21 +214,21 @@ export class PluginController {
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: 'message/private', callback: MessageCallback, options?: MessageEventOptions): void
+    public on(event: 'message/private', callback: MessageCallback, options?: MessageEventOptions): void
     /**
      * Add group message handler.
      * @param event Event name
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: 'message/group', callback: MessageCallback, options?: MessageEventOptions): void
+    public on(event: 'message/group', callback: MessageCallback, options?: MessageEventOptions): void
     /**
      * Add channel message handler.
      * @param event Event name
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: 'message/channel', callback: MessageCallback, options?: MessageEventOptions): void
+    public on(event: 'message/channel', callback: MessageCallback, options?: MessageEventOptions): void
     /**
      * Add message handle.
      * will be trigger on private message or group message with mentions to robot
@@ -226,7 +236,7 @@ export class PluginController {
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: 'message/focused', callback: MessageCallback, options?: MessageEventOptions): void
+    public on(event: 'message/focused', callback: MessageCallback, options?: MessageEventOptions): void
     /**
      * Add message handler.
      * Will handle all messages (group, private, channel)
@@ -234,7 +244,7 @@ export class PluginController {
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: 'message', callback: MessageCallback, options?: MessageEventOptions): void
+    public on(event: 'message', callback: MessageCallback, options?: MessageEventOptions): void
     /**
      * Add raw message handler.
      * Will be triggered even when the message is a command.
@@ -242,28 +252,28 @@ export class PluginController {
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: 'raw/message', callback: MessageCallback, options?: MessageEventOptions): void
+    public on(event: 'raw/message', callback: MessageCallback, options?: MessageEventOptions): void
     /**
      * Add robot raw event handler.
      * @param event Event name
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: 'raw/event', callback: RawEventCallback, options?: MessageEventOptions): void
+    public on(event: 'raw/event', callback: RawEventCallback, options?: MessageEventOptions): void
     /**
      * Add other event handler.
      * @param event Event name
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: string, callback: CallableFunction, options?: MessageEventOptions): void
+    public on(event: string, callback: CallableFunction, options?: MessageEventOptions): void
     /**
      * Add event handler.
      * @param event Event name
      * @param callback Callback function
      * @param options Options
      */
-    protected on(event: string, callback: CallableFunction, options?: MessageEventOptions): void {
+    public on(event: string, callback: CallableFunction, options?: MessageEventOptions): void {
         if (!(event in this.eventList)) {
             this.eventList[event] = [];
         }
@@ -289,7 +299,7 @@ export class PluginController {
         this.eventManager.on(event, this, callback, options);
     }
 
-    protected off(event: string, callback: CallableFunction): void {
+    public off(event: string, callback: CallableFunction): void {
         if (Array.isArray(this.eventList[event])) {
             this.eventList[event] = this.eventList[event].filter((eventInfo) => {
                 return eventInfo.callback !== callback;
@@ -306,9 +316,9 @@ export class PluginController {
      * @param callback 
      * @param options 
      */
-    protected registerCommand(command: string, name: string, callback: CommandCallback, options?: MessageEventOptions): void
-    protected registerCommand(commandInfo: CommandInfo, callback: CommandCallback, options?: MessageEventOptions): void
-    protected registerCommand(...args: any[]): void {
+    public registerCommand(command: string, name: string, callback: CommandCallback, options?: MessageEventOptions): void
+    public registerCommand(commandInfo: CommandInfo, callback: CommandCallback, options?: MessageEventOptions): void
+    public registerCommand(...args: any[]): void {
         // 处理传入参数
         let commandInfo: Partial<CommandInfo> = {};
         let callback: MessageCallback;
@@ -334,6 +344,8 @@ export class PluginController {
                 this.on(`command/${cmd}`, callback, options);
             });
         }
+
+        this.eventManager.addCommand(commandInfo as any, this);
     }
 
     /**
@@ -349,6 +361,7 @@ export class PluginController {
      */
     public async destroy() {
         this.eventManager.off(this);
+        this.eventManager.removeCommand(this);
 
         this.eventList = {};
     }
