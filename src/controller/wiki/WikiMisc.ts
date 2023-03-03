@@ -1,4 +1,4 @@
-import request from "request-promise";
+import got from "got";
 import App from "../../App";
 import { CommonReceivedMessage } from "../../message/Message";
 import { PluginEvent } from "../../PluginManager";
@@ -9,10 +9,6 @@ export class WikiMisc {
 
     private apiEndpoint: string;
 
-    public id = 'sfsettings';
-    public name = '科幻设定百科';
-    public description = '科幻设定百科的相关功能';
-
     constructor(app: App, apiEndpoint: string) {
         this.app = app;
         this.apiEndpoint = apiEndpoint;
@@ -20,19 +16,16 @@ export class WikiMisc {
 
     public async handleSearch(args: string, message: CommonReceivedMessage) {
         try {
-            let res = await request({
-                uri: this.apiEndpoint,
-                method: 'GET',
-                qs: {
+            let res = await got.post(this.apiEndpoint, {
+                form: {
                     action: 'opensearch',
                     search: args,
                     limit: 10,
                     namespace: 0,
                     format: 'json',
                     formatversion: 2,
-                },
-                json: true,
-            });
+                }
+            }).json<any>();
 
             if (res.error) {
                 message.sendReply('获取词条列表失败: ' + res.error.info, true);
@@ -45,10 +38,8 @@ export class WikiMisc {
             }
 
             // Get page info
-            res = await request({
-                uri: this.apiEndpoint,
-                method: 'GET',
-                qs: {
+            res = await got.post(this.apiEndpoint, {
+                form: {
                     action: 'query',
                     prop: 'info|extracts',
                     inprop: 'url',
@@ -61,8 +52,7 @@ export class WikiMisc {
                     formatversion: 2,
                     titles: titles[0],
                 },
-                json: true,
-            });
+            }).json<any>();
 
             if (res.error) {
                 message.sendReply('获取词条详情失败: ' + res.error.info, true);
@@ -89,10 +79,8 @@ export class WikiMisc {
 
     public async handleRandomPage(args: string, message: CommonReceivedMessage) {
         try {
-            let res = await request({
-                uri: this.apiEndpoint,
-                method: 'GET',
-                qs: {
+            let res = await got.post(this.apiEndpoint, {
+                form: {
                     action: 'query',
                     prop: 'info|extracts',
                     inprop: 'url',
@@ -106,8 +94,7 @@ export class WikiMisc {
                     format: 'json',
                     formatversion: 2,
                 },
-                json: true,
-            });
+            }).json<any>();
 
             if (res.error) {
                 message.sendReply('获取随机页面失败: ' + res.error.info, true);
@@ -115,7 +102,7 @@ export class WikiMisc {
             }
 
             if (this.app.debug) {
-                console.log(res);
+                this.app.logger.debug('随机页面信息', res);
             }
 
             let pageTitle = res.query.random?.[0]?.title;
@@ -124,10 +111,8 @@ export class WikiMisc {
                 return;
             }
             // Get page info 
-            res = await request({
-                uri: this.apiEndpoint,
-                method: 'GET',
-                qs: {
+            res = await got.post(this.apiEndpoint, {
+                form: {
                     action: 'query',
                     prop: 'info|extracts',
                     inprop: 'url',
@@ -140,8 +125,7 @@ export class WikiMisc {
                     formatversion: 2,
                     titles: pageTitle,
                 },
-                json: true,
-            });
+            }).json();
 
             if (res.error) {
                 message.sendReply('获取随机页面失败: ' + res.error.info, true);

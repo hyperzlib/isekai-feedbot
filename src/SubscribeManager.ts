@@ -67,7 +67,7 @@ export class SubscribeManager {
         this.loadSubscribeFile();
         this.subscribeList = {};
         this.rebuildTree();
-        console.log('已重载Subscribe');
+        this.app.logger.info('已重载Subscribe');
     }
 
     /**
@@ -80,14 +80,10 @@ export class SubscribeManager {
                 let targetTypeConf = targetConf[targetType];
                 for (let targetId in targetTypeConf) {
                     let subscribeList = targetTypeConf[targetId];
-                    if (subscribeList.channel) {
-                        for (let sourceId in subscribeList.channel) {
-                            this.addSubscribe(robotId, targetType, targetId, 'channel:' + sourceId);
-                        }
-                    }
-                    if (subscribeList.controller) {
-                        for (let controllerId in subscribeList.controller) {
-                            this.addSubscribe(robotId, targetType, targetId, 'controller:' + controllerId);
+                    for (let sourceType in subscribeList) {
+                        let sourceList = subscribeList[sourceType];
+                        for (let sourceId of sourceList) {
+                            this.addSubscribe(robotId, targetType, targetId, sourceType + ':' + sourceId);
                         }
                     }
                 }

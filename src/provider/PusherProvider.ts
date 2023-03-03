@@ -3,8 +3,7 @@ import { BaseProvider, MultipleMessage } from "../base/provider/BaseProvider";
 import { ChannelConfig } from "../Config";
 import { ConfigCheckError } from "../error/ConfigCheckError";
 import PusherService from "../service/PusherService";
-
-const { string, optional, object, guard } = require("decoders");
+import { string, optional, object, guard } from "decoders";
 
 export type PusherProviderConfig = {
     source: {

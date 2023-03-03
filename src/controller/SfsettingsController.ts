@@ -15,7 +15,7 @@ export default class SfsettingsController implements PluginController {
     }
 
     public async initialize(): Promise<void> {
-        this.event.controller = this;
+        this.event.init(this);
 
         const wikiMisc = new WikiMisc(this.app, 'https://www.sfsettings.com/w/api.php');
 

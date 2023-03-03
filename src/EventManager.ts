@@ -1,34 +1,57 @@
 import App from "./App";
+import { CommandOverrideConfig } from "./Config";
 import { CommonReceivedMessage, CommonSendMessage } from "./message/Message";
-import { CommandInfo, ControllerSubscribeSource, MessageEventOptions, MessagePriority, PluginController, PluginEvent } from "./PluginManager";
+import { SenderIdentity } from "./message/Sender";
+import { CommandInfo, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
 import { Robot } from "./RobotManager";
 
-export type PluginControllerListenerInfo = {
+export type ControllerEventInfo = {
     priority: number;
     callback: CallableFunction;
-    controllerEvent: PluginEvent;
+    eventScope: PluginEvent;
 }
 
-export type PluginControllerCommandInfo = {
+export type SessionEventInfo = {
+    activeTime: Date;
+    eventScope: EventScope;
+}
+
+export type ControllerCommandInfo = {
     commandInfo: CommandInfo;
-    controllerEvent: PluginEvent;
+    eventScope: PluginEvent;
 }
 
 export class EventManager {
     private app: App;
+
+    /** 事件排序的debounce */
     private eventSortDebounce: Record<string, NodeJS.Timeout> = {};
-    private eventList: Record<string, PluginControllerListenerInfo[]> = {};
-    private commandList: Record<string, PluginControllerCommandInfo> = {};
+
+    /** 全局事件列表 */
+    private eventList: Record<string, ControllerEventInfo[]> = {};
+    
+    /** 会话事件列表 */
+    private sessionEventList: Record<string, EventScope> = {};
+
+    /** 全局指令列表 */
+    private commandList: Record<string, ControllerCommandInfo> = {};
+
+    /** 指令信息 */
+    private commandInfoList: ControllerCommandInfo[] = [];
+
+    /** 指令信息覆盖配置 */
+    private commandOverride: CommandOverrideConfig;
 
     constructor(app: App) {
         this.app = app;
+        this.commandOverride = app.config.command_override ?? {};
     }
 
     public async initialize() {
         
     }
 
-    public on(event: string, controllerEvent: PluginEvent, callback: CallableFunction, options?: MessageEventOptions) {
+    public on(event: string, eventScope: PluginEvent, callback: CallableFunction, options?: MessageEventOptions) {
         if (!(event in this.eventList)) {
             this.eventList[event] = [];
         }
@@ -48,7 +71,7 @@ export class EventManager {
         const eventInfo = {
             callback: callback,
             priority: options.priority!,
-            controllerEvent
+            eventScope
         };
 
         this.eventList[event].push(eventInfo);
@@ -56,62 +79,73 @@ export class EventManager {
         this.sortEvent(event);
     }
 
-    public off(event: string, controllerEvent: PluginEvent, callback: CallableFunction): void
-    public off(controllerEvent: PluginEvent): void
+    public off(event: string, eventScope: PluginEvent, callback: CallableFunction): void
+    public off(eventScope: PluginEvent): void
     public off(...args: any): void {
         if (typeof args[0] === 'string') {
             let [event, controller, callback] = args;
             if (Array.isArray(this.eventList[event])) {
-                this.eventList[event] = this.eventList[event].filter((eventInfo) => eventInfo.callback !== callback || eventInfo.controllerEvent !== controller);
+                this.eventList[event] = this.eventList[event].filter((eventInfo) => eventInfo.callback !== callback || eventInfo.eventScope !== controller);
             }
         } else if (typeof args[0] !== 'undefined') {
             let controller = args[0];
             for (let event in this.eventList) {
-                this.eventList[event] = this.eventList[event].filter((eventInfo) => eventInfo.controllerEvent !== controller);
+                this.eventList[event] = this.eventList[event].filter((eventInfo) => eventInfo.eventScope !== controller);
             }
         }
     }
 
-    public addCommand(commandInfo: CommandInfo, controllerEvent: PluginEvent) {
+    public addCommand(commandInfo: CommandInfo, eventScope: PluginEvent) {
+        // 如果配置了Command覆盖，则覆盖原本的指令设置
+        if (commandInfo.command in this.commandOverride) {
+            commandInfo = {
+                ...commandInfo,
+                ...this.commandOverride[commandInfo.command]
+            };
+        }
+
         let data = {
             commandInfo,
-            controllerEvent: controllerEvent
+            eventScope: eventScope
         };
-        this.commandList[commandInfo.command] = data;
+        this.commandInfoList.push(data);
+        this.commandList[commandInfo.command.toLocaleLowerCase()] = data;
         if (Array.isArray(commandInfo.alias)) {
             commandInfo.alias.forEach((alias) => {
-                this.commandList[alias] = data;
+                this.commandList[alias.toLocaleLowerCase()] = data;
             });
         }
     }
 
     public removeCommand(commandInfo: CommandInfo): void
-    public removeCommand(controllerEvent: PluginEvent): void
+    public removeCommand(eventScope: PluginEvent): void
     public removeCommand(...args: any): void {
         if ('command' in args[0]) {
             let commandInfo: CommandInfo = args[0];
-            delete this.commandList[commandInfo.command];
+            this.commandInfoList = this.commandInfoList.filter((commandInfoItem) => commandInfoItem.commandInfo !== commandInfo);
+            delete this.commandList[commandInfo.command.toLocaleLowerCase()];
             if (Array.isArray(commandInfo.alias)) {
                 commandInfo.alias.forEach((alias) => {
-                    delete this.commandList[alias];
+                    delete this.commandList[alias.toLocaleLowerCase()];
                 });
             }
         } else if (typeof args[0] !== 'undefined') {
-            let controllerEvent = args[0];
+            let eventScope = args[0];
+            this.commandInfoList = this.commandInfoList.filter((commandInfoItem) => commandInfoItem.eventScope !== eventScope);
             for (let command in this.commandList) {
-                if (this.commandList[command].controllerEvent.controller?.id === controllerEvent.controller?.id) {
+                if (this.commandList[command].eventScope.controller?.id === eventScope.controller?.id) {
                     delete this.commandList[command];
                 }
             }
         }
     }
 
-    public async emit(eventName: string, senderInfo?: ControllerSubscribeSource | null, ...args: any[]) {
+    public async emit(eventName: string, senderInfo?: SenderIdentity | null, ...args: any[]) {
         if (this.app.debug) {
             if (args[0] instanceof CommonReceivedMessage) {
-                console.log(`[DEBUG] 触发事件 ${eventName} ${args[0].contentText}`);
+                this.app.logger.debug(`触发事件 ${eventName} ${args[0].contentText}`);
             } else {
-                console.log(`[DEBUG] 触发事件 ${eventName}`);
+                this.app.logger.debug(`触发事件 ${eventName}`);
             }
         }
         
@@ -126,40 +160,46 @@ export class EventManager {
             isResolved = true;
         };
 
-        let subscribeList: string[] = [];
-
-        if (senderInfo) {
-            // 获取订阅列表
-            let targetType = '';
-            let targetId = '';
-            switch (senderInfo.type) {
-                case 'private':
-                    targetType = 'user';
-                    targetId = senderInfo.userId!;
-                    break;
-                case 'group':
-                    targetType = 'group';
-                    targetId = senderInfo.groupId!;
-                    break;
-                case 'channel':
-                    targetType = 'channel';
-                    targetId = senderInfo.channelId!;
-                    break;
-            }
-            subscribeList = this.app.subscribe.getSubscribedList(senderInfo.robot.robotId!, targetType, targetId, 'controller');
-        }
+        let [subscribedControllers, disabledControllers] = this.getControllerSubscribe(senderInfo);
 
         for (let eventInfo of eventList) {
             if (!isFilter && senderInfo) {
-                if (eventInfo.controllerEvent.autoSubscribe) {
-                    if (!eventInfo.controllerEvent.isAllowSubscribe(senderInfo)) {
-                        continue;
+                switch (senderInfo.type) {
+                    case 'private':
+                        if (!eventInfo.eventScope.allowPrivate) {
+                            continue;
+                        }
+                        if (!eventInfo.eventScope.isAllowSubscribe(senderInfo)) {
+                            continue;
+                        }
+                        break;
+                    case 'group':
+                        if (!eventInfo.eventScope.allowGroup) {
+                            continue;
+                        }
+                        break;
+                    case 'channel':
+                        if (!eventInfo.eventScope.allowChannel) {
+                            continue;
+                        }
+                        break;
+                }
+
+                if (senderInfo.type !== 'private') { // 私聊消息不存在订阅，只判断群消息和频道消息
+                    if (eventInfo.eventScope.autoSubscribe) {
+                        if (!eventInfo.eventScope.isAllowSubscribe(senderInfo)) {
+                            continue;
+                        } else {
+                            // 检测控制器是否已禁用
+                            if (!eventInfo.eventScope.controller || disabledControllers.includes(eventInfo.eventScope.controller.id)) {
+                                continue;
+                            }
+                        }
                     } else {
-                        // 需要添加订阅检测
-                    }
-                } else if (senderInfo.type !== 'private') {
-                    if (!eventInfo.controllerEvent.controller || !subscribeList.includes(eventInfo.controllerEvent.controller.id)) {
-                        continue;
+                        // 检测控制器是否已启用
+                        if (!eventInfo.eventScope.controller || !subscribedControllers.includes(eventInfo.eventScope.controller.id)) {
+                            continue;
+                        }
                     }
                 }
             }
@@ -170,7 +210,7 @@ export class EventManager {
                     break;
                 }
             } catch(err: any) {
-                console.error(`事件 ${eventName} 处理失败`);
+                this.app.logger.error(`事件 ${eventName} 处理失败: `, err);
                 console.error(err);
             }
         }
@@ -206,7 +246,7 @@ export class EventManager {
 
         // 尝试识别空格分隔的指令
         if (contentText.includes(' ')) {
-            command = contentText.split(' ')[0];
+            command = contentText.split(' ')[0].toLocaleLowerCase();
             args = contentText.substring(command.length + 1);
 
             if (!(command in this.commandList)) {
@@ -232,7 +272,7 @@ export class EventManager {
         }
 
         if (this.app.debug) {
-            console.log('[DEBUG] 指令识别结果', command, args);
+            this.app.logger.debug('指令识别结果', command, args);
         }
 
         return await this.emit(`command/${command}`, this.getSenderInfo(message), args, message);
@@ -257,7 +297,7 @@ export class EventManager {
         
     }
 
-    public getSenderInfo(message: CommonReceivedMessage): ControllerSubscribeSource {
+    public getSenderInfo(message: CommonReceivedMessage): SenderIdentity {
         if (message.origin === 'private') {
             return {
                 type: 'private',
@@ -277,6 +317,37 @@ export class EventManager {
             type: 'unknown',
             robot: message.receiver
         }
+    }
+
+    public getControllerSubscribe(senderInfo?: SenderIdentity | null): [string[], string[]] {
+        let subscribedCommands: string[] = [];
+        let disabledCommands: string[] = [];
+
+        if (senderInfo) {
+            let targetType = '';
+            let targetId = '';
+            switch (senderInfo.type) {
+                case 'private':
+                    targetType = 'user';
+                    targetId = senderInfo.userId!;
+                    break;
+                case 'group':
+                    targetType = 'group';
+                    targetId = senderInfo.groupId!;
+                    break;
+                case 'channel':
+                    targetType = 'channel';
+                    targetId = senderInfo.channelId!;
+                    break;
+            }
+            subscribedCommands = this.app.subscribe.getSubscribedList(senderInfo.robot.robotId!, targetType, targetId, 'controller');
+            disabledCommands = this.app.subscribe.getSubscribedList(senderInfo.robot.robotId!, targetType, targetId, 'disable_controller');
+        }
+
+        return [
+            subscribedCommands,
+            disabledCommands
+        ];
     }
 
     private sortEvent(eventName: string) {

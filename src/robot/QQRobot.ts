@@ -1,15 +1,19 @@
+import koa from "koa";
+import got from "got/dist/source";
+
 import App from "../App";
 import { Robot } from "../RobotManager";
 import { Target } from "../SubscribeManager";
-import request from "request-promise";
 import { Utils } from "../utils/Utils";
 import { FullRestfulContext, RestfulApiManager, RestfulRouter } from "../RestfulApiManager";
-import koa from "koa";
-import { convertMessageToQQChunk, parseQQMessageChunk, QQFaceMessage, QQGroupMessage, QQGroupSender, QQImageMessage, QQPrivateMessage, QQUserSender, QQVoiceMessage } from "./qq/Message";
-import { CommonReceivedMessage, CommonSendMessage, MentionMessage, TextMessage } from "../message/Message";
+import { convertMessageToQQChunk, parseQQMessageChunk, QQGroupMessage, QQGroupSender, QQPrivateMessage, QQUserSender } from "./qq/Message";
+import { CommonReceivedMessage, CommonSendMessage } from "../message/Message";
+import { PluginController } from "../PluginManager";
+import { RobotConfig } from "../Config";
+import { SenderIdentity } from "../message/Sender";
 
-export type QQRobotConfig = {
-    user: string;
+export type QQRobotConfig = RobotConfig & {
+    uid: string;
     host: string;
     command_prefix?: string;
 }
@@ -26,6 +30,7 @@ export default class QQRobot implements Robot {
 
     public uid: string;
     public robotId: string;
+    public description: string;
 
     public commandPrefix: string[] = ['/', '！', '!', '／'];
 
@@ -36,11 +41,15 @@ export default class QQRobot implements Robot {
 
     private groupList: QQGroupInfo[] = [];
 
+    private messageTypeHandler: Record<string, (message: CommonSendMessage) => Promise<CommonSendMessage | void>> = {};
+
     constructor(app: App, robotId: string, config: QQRobotConfig) {
         this.app = app;
         this.robotId = robotId;
         this.endpoint = 'http://' + config.host;
-        this.uid = config.user;
+        this.uid = config.uid.toString();
+
+        this.description = config.description ?? this.app.config.robot_description ?? 'Isekai Feedbot for QQ';
 
         if (config.command_prefix) {
             if (Array.isArray(config.command_prefix)) {
@@ -49,6 +58,8 @@ export default class QQRobot implements Robot {
                 this.commandPrefix = [config.command_prefix];
             }
         }
+
+        this.messageTypeHandler.help = this.parseHelpMessage.bind(this);
     }
 
     async initialize() {
@@ -93,6 +104,44 @@ export default class QQRobot implements Robot {
         await next();
     }
 
+    async parseHelpMessage(message: CommonSendMessage) {
+        const controllers = message.extra.controllers as PluginController[];
+
+        let helpBuilder: string[] = [];
+        if (this.description) {
+            helpBuilder.push(this.description, '');
+        }
+
+        helpBuilder.push(
+            '可用的指令前缀："' + this.commandPrefix.join('"、"') + '"',
+            '功能列表：'
+        );
+        const mainCommandPrefix = this.commandPrefix[0];
+
+        for (let controller of controllers) {
+            helpBuilder.push(`【${controller.name}】`);
+            if (controller.event.commandList.length > 0) {
+                controller.event.commandList.forEach(commandInfo => {
+                    helpBuilder.push(`${mainCommandPrefix}${commandInfo.command} - ${commandInfo.name}`);
+                });
+            } else {
+                helpBuilder.push('此功能没有指令');
+            }
+            helpBuilder.push('');
+        }
+
+        if (helpBuilder[helpBuilder.length - 1] === '') {
+            helpBuilder.pop();
+        }
+
+        message.content = [{
+            type: 'text',
+            data: {
+                text: helpBuilder.join('\n')
+            }
+        }];
+    }
+
     /**
      * 处理消息事件
      * @param postData 
@@ -110,7 +159,7 @@ export default class QQRobot implements Robot {
                 // 处理群消息
                 let groupInfo = this.groupList.find((info) => info.groupId === postData.group_id);
 
-                let groupSender = new QQGroupSender(postData.group_id.toString(), postData.user_id.toString());
+                let groupSender = new QQGroupSender(this, postData.group_id.toString(), postData.user_id.toString());
                 groupSender.groupInfo = groupInfo;
                 groupSender.groupName = groupInfo?.groupName;
                 groupSender.globalNickName = postData.sender?.nickname;
@@ -125,7 +174,7 @@ export default class QQRobot implements Robot {
                 message = await parseQQMessageChunk(this, postData.message ?? [], message);
             } else if (postData.message_type === 'private') {
                 // 处理私聊消息
-                let userSender = new QQUserSender(postData.user_id.toString());
+                let userSender = new QQUserSender(this, postData.user_id.toString());
                 userSender.nickName = postData.sender?.nickname;
 
                 message = new QQPrivateMessage(userSender, this, postData.message_id.toString());
@@ -160,6 +209,11 @@ export default class QQRobot implements Robot {
             }
         }
         return null;
+    }
+
+    getSession(senderIdentity: SenderIdentity, type: string) {
+        const sessionPath = this.app.robot.getSessionPath(senderIdentity, type);
+        return this.app.session.getStore(sessionPath);
     }
 
     /**
@@ -206,15 +260,19 @@ export default class QQRobot implements Robot {
      * @param message 
      */
     async sendMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
+        if (message.type in this.messageTypeHandler) {
+            this.app.logger.debug('[DEBUG] 运行消息类型处理器', message.type);
+            let newMessage = await this.messageTypeHandler[message.type](message);
+            if (newMessage) message = newMessage;
+        }
+
         let msgData = await convertMessageToQQChunk(message);
 
         if (message.origin === 'private') {
-            if (this.app.debug) console.log('[DEBUG] 发送私聊消息', message.targetId, msgData);
-            
+            this.app.logger.debug('[DEBUG] 发送私聊消息', message.targetId, msgData);
             await this.sendToUser(message.targetId, msgData);
         } else if (message.origin === 'group') {
-            if (this.app.debug) console.log('[DEBUG] 发送群消息', message.targetId, msgData);
-            
+            this.app.logger.debug('[DEBUG] 发送群消息', message.targetId, msgData);
             await this.sendToGroup(message.targetId, msgData);
         }
 
@@ -256,12 +314,9 @@ export default class QQRobot implements Robot {
      * 执行API调用
      */
     async doApiRequest(method: string, data: any): Promise<any> {
-        return await request({
-            method: 'POST',
-            uri: this.endpoint + '/' + method,
-            body: data,
-            json: true,
+        return await got.post(this.endpoint + '/' + method, {
+            json: data,
             timeout: 10000
-        });
+        }).json<any>();
     }
 }

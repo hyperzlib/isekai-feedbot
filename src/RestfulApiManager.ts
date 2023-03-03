@@ -3,7 +3,7 @@ import Koa from 'koa';
 import { RestfulApiConfig } from "./Config";
 import Router from "koa-router";
 import { makeRoutes } from "./restful/routes";
-import koaBody from "koa-body";
+import { koaBody } from "koa-body";
 
 export interface RestfulContext {
     feedbot: App,
@@ -46,7 +46,7 @@ export class RestfulApiManager {
         return new Promise((resolve) => {
             this.koa.use(this.router.routes());
             this.koa.listen(this.config.port, () => {
-                console.log(`Restful API 启动于：http://${this.config.host}:${this.config.port}`);
+                this.app.logger.info(`Restful API 启动于：http://${this.config.host}:${this.config.port}`);
                 resolve();
             });
         });

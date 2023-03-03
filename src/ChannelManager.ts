@@ -96,7 +96,6 @@ export class ChannelManager extends EventEmitter {
                 this.channelName[channelId] = config?.name;
             } else {
                 if (BaseProvider.checkConfig(config)) {
-                    // console.log(`正在加载Channel: ${channelId}`);
                     // 处理channel
                     let providerName = this.getProviderName(config);
                     let isReload = false;
@@ -114,10 +113,10 @@ export class ChannelManager extends EventEmitter {
                         this.channelName[channelId] = config?.name;
                         if (isReload) {
                             this.emit('reload', channelId);
-                            console.log(`已重载Channel: ${channelId}`);
+                            this.app.logger.info(`已重载Channel: ${channelId}`);
                         } else {
                             this.emit('add', channelId);
-                            console.log(`已加载Channel: ${channelId}`);
+                            this.app.logger.info(`已加载Channel: ${channelId}`);
                         }
                     }
                 } else {
@@ -148,7 +147,7 @@ export class ChannelManager extends EventEmitter {
                 delete this.channels[channelId];
                 delete this.channelName[channelId];
                 this.emit('remove', channelId);
-                console.log("已移除Channel: ", this.getChannelFullName(channelId));
+                this.app.logger.info("已移除Channel: ", this.getChannelFullName(channelId));
             }
         }
     }

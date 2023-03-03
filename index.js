@@ -1,7 +1,4 @@
-const Promise = require('bluebird');
-Promise.config({
-    cancellation: true,
-});
+import 'node-telegram-bot-api';
+import App from './dist/App';
 
-var App = require('./dist/App').default;
-new App(__dirname + "/config.yml");
+new App("./config.yml");

@@ -34,8 +34,8 @@ export interface QQUrlMessage extends MessageChunk {
 }
 
 export class QQUserSender extends UserSender {
-    constructor(uid: string) {
-        super(uid);
+    constructor(robot: QQRobot, uid: string) {
+        super(robot, uid);
         this.userName = uid;
     }
 }
@@ -46,13 +46,13 @@ export class QQGroupSender extends GroupSender {
     public title?: string;
     public groupInfo?: QQGroupInfo;
 
-    constructor(groupId: string, uid: string) {
-        super(groupId, uid);
+    constructor(robot: QQRobot, groupId: string, uid: string) {
+        super(robot, groupId, uid);
         this.userName = uid;
     }
 
     get userSender() {
-        let sender = new QQUserSender(this.uid);
+        let sender = new QQUserSender(this.robot as any, this.uid);
         sender.userName = this.userName;
         sender.nickName = this.globalNickName;
 

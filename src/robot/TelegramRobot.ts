@@ -1,26 +1,33 @@
 import TelegramBot from "node-telegram-bot-api";
 import App from "../App";
+import { RobotConfig } from "../Config";
 import { CommonSendMessage } from "../message/Message";
+import { SenderIdentity } from "../message/Sender";
 import { CommandInfo } from "../PluginManager";
 import { Robot } from "../RobotManager";
 import { Target } from "../SubscribeManager";
 import { Utils } from "../utils/Utils";
 
-export type TelegramRobotConfig = {
+export type TelegramRobotConfig = RobotConfig & {
     token: string;
-    baseId?: string;
     proxy?: string;
 }
 
 export default class TelegramRobot implements Robot {
+    private app: App;
+
     public type = 'telegram';
     public robotId: string;
     public uid?: string;
+    public description: string;
 
     private bot: TelegramBot;
 
     constructor(app: App, robotId: string, config: TelegramRobotConfig) {
+        this.app = app;
+        
         this.robotId = robotId;
+        this.description = config.description ?? app.config.robot_description ?? 'Isekai Feedbot for Telegram';
 
         let botOptions: any = {
             polling: true
@@ -68,6 +75,11 @@ export default class TelegramRobot implements Robot {
         }
         await this.bot.setMyCommands(botCommands);
         */
+    }
+
+    getSession(senderIdentity: SenderIdentity, type: string) {
+        const sessionPath = this.app.robot.getSessionPath(senderIdentity, type);
+        return this.app.session.getStore(sessionPath);
     }
 
     /**

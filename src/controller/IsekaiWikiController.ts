@@ -19,7 +19,7 @@ export default class IsekaiWikiController implements PluginController {
     }
 
     public async initialize(): Promise<void> {
-        this.event.controller = this;
+        this.event.init(this);
 
         const wikiMisc = new WikiMisc(this.app, 'https://www.isekai.cn/api.php');
 

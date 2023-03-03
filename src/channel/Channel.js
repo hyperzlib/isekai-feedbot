@@ -1,6 +1,6 @@
-var utils = require('../Utils');
+import { Utils as utils } from '../utils/Utils';
 
-class Channel {
+export default class Channel {
     constructor(app, config){
         this.app = app;
         this.config = config;
@@ -172,5 +172,3 @@ class Channel {
         }
     }
 }
-
-module.exports = Channel;

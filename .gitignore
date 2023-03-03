@@ -3,3 +3,4 @@ subscribe.yml
 node_modules/
 dist/
 *.zip
+configs/

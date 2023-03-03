@@ -4,8 +4,6 @@ import App from './App';
 import { BaseProvider } from './base/provider/BaseProvider';
 import { ChannelConfig } from './Config';
 
-const PROVIDER_PATH = __dirname + "/provider";
-
 export class ProviderManager {
     private app: App;
     private providerClasses: { [key: string]: any }
@@ -16,20 +14,22 @@ export class ProviderManager {
     }
 
     async initialize() {
+        const PROVIDER_PATH = path.join(this.app.srcPath, "provider");
+
         for (let file of fs.readdirSync(PROVIDER_PATH)) {
             let providerFile = `${PROVIDER_PATH}/${file}`;
             if (providerFile.match(/\.(js|mjs)$/)) {
                 // 加载js文件
                 let providerName = path.basename(providerFile).replace(/Provider\.(js|mjs)$/gi, "").toLocaleLowerCase();
                 try {
-                    let provider = require(providerFile)?.default;
-                    if (!provider) {
+                    let provider = await import(providerFile);
+                    if (!provider || !provider.default) {
                         throw new Error("provider is empty");
                     }
-                    this.providerClasses[providerName] = provider;
-                    console.log(`已加载Provider: ${providerName}`);
+                    this.providerClasses[providerName] = provider.default;
+                    this.app.logger.info(`已加载Provider: ${providerName}`);
                 } catch(err) {
-                    console.log(`无法加载Provider: ${providerName}`, err);
+                    this.app.logger.info(`无法加载Provider: ${providerName}`, err);
                 }
             }
         }

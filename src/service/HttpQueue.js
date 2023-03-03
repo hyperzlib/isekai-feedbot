@@ -1,5 +1,3 @@
-class HttpQueue {
+export default class HttpQueue {
 
 }
-
-module.exports = HttpQueue;

@@ -1,27 +1,33 @@
 import fs from 'fs';
-import path from 'path';
+import winston from 'winston';
 import Yaml from 'yaml';
-import { BaseProvider, MultipleMessage } from './base/provider/BaseProvider';
+import { fileURLToPath } from 'url';
+import path from 'path';
 
+import { BaseProvider, MultipleMessage } from './base/provider/BaseProvider';
+import { Setup } from './Setup';
 import { ChannelManager } from './ChannelManager';
 import { ChannelConfig, Config } from './Config';
 import { EventManager } from './EventManager';
-import { CommonSendMessage } from './message/Message';
 import { PluginManager } from './PluginManager';
 import { ProviderManager } from './ProviderManager';
 import { RestfulApiManager } from './RestfulApiManager';
 import { RobotManager } from './RobotManager';
 import { Service, ServiceManager } from './ServiceManager';
-import { Setup } from './Setup';
 import { SubscribeManager, Target } from './SubscribeManager';
+import { SessionManager } from './SessionManager';
 
 export default class App {
     public config: Config;
-    public srcPath: string = __dirname;
+    
+    public srcPath: string = path.dirname(fileURLToPath(import.meta.url));
+    public basePath: string = path.dirname(this.srcPath);
 
     public debug: boolean = false;
 
+    public logger!: winston.Logger;
     public event!: EventManager;
+    public session!: SessionManager;
     public robot!: RobotManager;
     public provider!: ProviderManager;
     public service!: ServiceManager;
@@ -33,7 +39,7 @@ export default class App {
     constructor(configFile: string) {
         this.config = Yaml.parse(fs.readFileSync(configFile, { encoding: 'utf-8' }));
         this.debug = this.config.debug;
-        
+
         this.initialize();
     }
 
@@ -41,17 +47,56 @@ export default class App {
         await this.initModules();
         await this.initRestfulApiManager();
         await this.initEventManager();
+        await this.initSessionManager();
         await this.initRobot();
         await this.initProviderManager();
         await this.initServiceManager();
         await this.initSubscribeManager();
         await this.initChannelManager();
         await this.initPluginManager();
-        console.log('初始化完成，正在接收消息');
+
+        this.logger.info('初始化完成，正在接收消息');
     }
 
     async initModules() {
         await Setup.initHandlebars();
+        
+        // 创建Logger
+        const loggerFormat = winston.format.printf(({ level, message, timestamp }) => {
+            return `${timestamp} [${level}]: ${message}`;
+        });
+
+        this.logger = winston.createLogger({
+            level: 'info',
+            format: winston.format.json(),
+        });
+
+        if (this.debug) {
+            this.logger.add(
+                new winston.transports.Console({
+                    format: winston.format.combine(
+                        winston.format.timestamp(),
+                        winston.format.colorize(),
+                        winston.format.simple(),
+                        loggerFormat,
+                        winston.format.metadata()
+                    ),
+                    level: 'debug'
+                })
+            );
+        } else {
+            this.logger.add(
+                new winston.transports.Console({
+                    format: winston.format.combine(
+                        winston.format.timestamp(),
+                        winston.format.colorize(),
+                        winston.format.simple(),
+                        loggerFormat
+                    ),
+                    level: 'info',
+                })
+            );
+        }
     }
 
     async initRestfulApiManager() {
@@ -62,6 +107,11 @@ export default class App {
     async initEventManager() {
         this.event = new EventManager(this);
         await this.event.initialize();
+    }
+
+    async initSessionManager() {
+        this.session = new SessionManager(this, this.config.session);
+        await this.session.initialize();
     }
 
     async initRobot() {
@@ -91,7 +141,7 @@ export default class App {
     }
 
     async initPluginManager() {
-        this.plugin = new PluginManager(this, this.config.plugin_path);
+        this.plugin = new PluginManager(this, this.config.plugin_path, this.config.plugin_config_path);
         await this.plugin.initialize();
     }
 
@@ -119,11 +169,7 @@ export default class App {
      * @returns
      */
     async sendPushMessage(channelId: string, messages: MultipleMessage): Promise<void> {
-        console.log(`[${channelId}] 消息: `, messages);
+        this.logger.info(`[${channelId}] 消息: `, messages);
         this.robot.sendPushMessage(channelId, messages);
-    }
-
-    require(file: string): any {
-        return require(path.join(this.srcPath, file));
     }
 }

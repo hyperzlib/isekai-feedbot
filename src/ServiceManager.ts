@@ -4,8 +4,6 @@ import path from 'path';
 import App from './App';
 import { ServiceConfig } from './Config';
 
-const SERVICE_PATH = __dirname + "/service";
-
 export interface Service {
     initialize(): Promise<void>;
     destory(): Promise<void>;
@@ -35,20 +33,22 @@ export class ServiceManager {
         this.services = {};
     }
 
-    async initialize() {
+    public async initialize() {
+        const SERVICE_PATH = path.join(this.app.srcPath, "service");
+
         for (let file of fs.readdirSync(SERVICE_PATH)) {
             let serviceFile = `${SERVICE_PATH}/${file}`;
             if (serviceFile.match(/\.(js|mjs)$/)) {
                 // 加载js文件
                 let serviceName = path.basename(serviceFile).replace(/Service\.(js|mjs)$/gi, "").toLocaleLowerCase();
                 try {
-                    let serviceClass = require(serviceFile)?.default;
-                    if (!serviceClass) {
+                    let serviceClass = await import(serviceFile);
+                    if (!serviceClass || !serviceClass.default) {
                         throw new Error("service is empty");
                     }
-                    this.serviceClasses[serviceName] = serviceClass;
+                    this.serviceClasses[serviceName] = serviceClass.default;
                 } catch(err) {
-                    console.log(`无法加载Service: ${serviceName}`, err);
+                    this.app.logger.error(`无法加载Service: ${serviceName}`, err);
                 }
             }
         }
@@ -67,7 +67,7 @@ export class ServiceManager {
                     let serviceObject: Service = new serviceClass(this.app, serviceConfig);
                     await serviceObject.initialize();
                     this.services[serviceName] = serviceObject;
-                    console.log(`已加载Service: ${serviceName}`);
+                    this.app.logger.info(`已加载Service: ${serviceName}`);
                 } catch(err) {
                     console.error(`无法加载 ${serviceName} Service: `, err);
                 }

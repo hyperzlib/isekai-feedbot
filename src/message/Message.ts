@@ -1,4 +1,5 @@
 import { Robot } from "../RobotManager";
+import { SessionStore } from "../SessionManager";
 import { BaseSender, GroupSender, UserSender } from "./Sender";
 
 export interface MessageChunk {
@@ -215,7 +216,20 @@ export class CommonSendMessage extends CommonMessage {
         this.targetId = targetId;
         if (Array.isArray(content)) this.content = content;
     }
+
+    async send(): Promise<void> {
+        await this.sender.sendMessage(this);
+    }
 }
+
+export type SessionStoreGroup = {
+    global: SessionStore;
+    robot: SessionStore;
+    user: SessionStore;
+    rootGroup: SessionStore;
+    group: SessionStore;
+    chat: SessionStore;
+};
 
 export class CommonReceivedMessage extends CommonMessage {
     /** 接收时间 */
@@ -226,6 +240,15 @@ export class CommonReceivedMessage extends CommonMessage {
     sender: any;
     /** 接收者是否被提到 */
     mentionedReceiver: boolean = false;
+    /** Session存储 */
+    session: SessionStoreGroup = new Proxy({} as any, {
+        get: (target, p) => {
+            if (!target[p]) {
+                target[p] = this.getSession(p as string);
+            }
+            return target[p];
+        },
+    }) as any;
 
     constructor(receiver: Robot, messageId?: string) {
         super();
@@ -234,7 +257,7 @@ export class CommonReceivedMessage extends CommonMessage {
         this.id = messageId;
     }
 
-    public async sendReply(message: string | MessageChunk[], addReply: boolean = false): Promise<CommonSendMessage | null> {
+    public createReplyMessage(message?: string | MessageChunk[], addReply: boolean = false) {
         const sender = this.sender as BaseSender;
         let newMessage = new CommonSendMessage(this.receiver!, this.origin, sender.targetId);
         if (typeof message === 'string') {
@@ -245,8 +268,6 @@ export class CommonReceivedMessage extends CommonMessage {
             newMessage.content = msgContent;
         } else if (Array.isArray(message)) {
             newMessage.content = message;
-        } else {
-            return null;
         }
 
         if (addReply) {
@@ -254,9 +275,20 @@ export class CommonReceivedMessage extends CommonMessage {
             newMessage.repliedMessage = this;
         }
 
+        return newMessage;
+    }
+
+    public async sendReply(message: string | MessageChunk[], addReply: boolean = false): Promise<CommonSendMessage | null> {
+        let newMessage = this.createReplyMessage(message, addReply);
+        if (newMessage.content.length === 0) return null;
+
         newMessage = await this.receiver.sendMessage(newMessage);
 
         return newMessage;
+    }
+
+    public getSession(type: string) {
+        return this.receiver.getSession(this.sender.identity, type);
     }
 }
 

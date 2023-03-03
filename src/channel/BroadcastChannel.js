@@ -1,6 +1,6 @@
 var Channel = require('./Channel');
 
-class BroadcastChannel extends Channel {
+export default class BroadcastChannel extends Channel {
     constructor(app){
         super(app, {});
     }
@@ -27,5 +27,3 @@ class BroadcastChannel extends Channel {
         }
     }
 }
-
-module.exports = BroadcastChannel;
