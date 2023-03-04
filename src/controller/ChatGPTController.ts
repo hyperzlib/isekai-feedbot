@@ -59,6 +59,15 @@ export default class ChatGPTController implements PluginController {
         });
 
         this.event.registerCommand({
+            command: 'aig',
+            name: '开始全群共享的对话',
+        }, (args, message, resolve) => {
+            resolve();
+
+            this.handleChatGPTChat(args, message, true).catch(console.error);
+        });
+
+        this.event.registerCommand({
             command: '重置对话',
             name: '重置对话',
         }, (args, message, resolve) => {
@@ -111,7 +120,7 @@ export default class ChatGPTController implements PluginController {
         this.DEFAULT_PROMPT = config.browser_api.prefix_prompt;
     }
 
-    private async handleChatGPTChat(content: string, message: CommonReceivedMessage) {
+    private async handleChatGPTChat(content: string, message: CommonReceivedMessage, shareWithGroup: boolean = false) {
         if (this.chatGenerating) {
             message.sendReply('正在生成另一段对话，请稍后', true);
             return;
@@ -121,10 +130,11 @@ export default class ChatGPTController implements PluginController {
             return;
         }
 
+        const sessionStore = shareWithGroup ? message.session.group : message.session.chat;
         let response: any;
 
         let isFirstMessage = false;
-        let chatSession = await message.session.chat.get<any>(this.SESSION_KEY_CHAT_SESSION);
+        let chatSession = await sessionStore.get<any>(this.SESSION_KEY_CHAT_SESSION);
         if (!chatSession) {
             isFirstMessage = true;
             chatSession = {};
@@ -149,7 +159,7 @@ export default class ChatGPTController implements PluginController {
             if (err?.json?.detail) {
                 if (err.json.detail === 'Conversation not found') {
                     message.sendReply('对话已失效，请重新开始', true);
-                    await message.session.chat.del(this.SESSION_KEY_CHAT_SESSION);
+                    await sessionStore.del(this.SESSION_KEY_CHAT_SESSION);
                     return;
                 }
             }
@@ -178,7 +188,7 @@ export default class ChatGPTController implements PluginController {
             chatSession.conversationId = response.conversationId;
             chatSession.parentMessageId = response.messageId;
 
-            await message.session.chat.set(this.SESSION_KEY_CHAT_SESSION, chatSession, 600);
+            await sessionStore.set(this.SESSION_KEY_CHAT_SESSION, chatSession, 600);
 
             message.sendReply(reply, true);
         }
