@@ -1,5 +1,5 @@
 import { caching, Cache } from "cache-manager";
-import { redisStore } from "cache-manager-redis-yet";
+import { redisStore } from "cache-manager-ioredis-yet";
 
 import App from "./App";
 import { SessionConfig } from "./Config";
