@@ -25,6 +25,7 @@ export class ChatGPTAPIError extends Error {
 export default class ChatGPTController implements PluginController {
     private SESSION_KEY_CHAT_SESSION = 'openai_chatSession';
     private SESSION_KEY_API_CHAT_LOG = 'openai_apiChatLog';
+    private SESSION_KEY_MESSAGE_COUNT = 'openai_apiMessageCount';
 
     private DEFAULT_PROMPT = '';
 
@@ -65,6 +66,8 @@ export default class ChatGPTController implements PluginController {
                     max_input_tokens: 1000,
                 }
             },
+            rate_limit: 2,
+            rate_limit_minutes: 5,
         }
     }
 
@@ -79,7 +82,7 @@ export default class ChatGPTController implements PluginController {
         }, (args, message, resolve) => {
             resolve();
 
-            this.handleChatGPTChat(args, message).catch(console.error);
+            return this.handleChatGPTChat(args, message);
         });
 
         this.event.registerCommand({
@@ -88,7 +91,7 @@ export default class ChatGPTController implements PluginController {
         }, (args, message, resolve) => {
             resolve();
 
-            this.handleChatGPTChat(args, message, true).catch(console.error);
+            return this.handleChatGPTChat(args, message, true);
         });
 
         this.event.registerCommand({
@@ -99,7 +102,7 @@ export default class ChatGPTController implements PluginController {
 
             message.session.chat.del(this.SESSION_KEY_CHAT_SESSION);
             message.session.chat.del(this.SESSION_KEY_API_CHAT_LOG);
-            message.sendReply('对话已重置', true);
+            return message.sendReply('对话已重置', true);
         });
 
         /*
@@ -108,7 +111,7 @@ export default class ChatGPTController implements PluginController {
             if (chatSession) {
                 resolved();
 
-                this.handleChatGPTChat(message.contentText, message).catch(console.error);
+                return this.handleChatGPTChat(message.contentText, message);
             }
         });
         */
@@ -116,7 +119,7 @@ export default class ChatGPTController implements PluginController {
         this.event.on('message/focused', async (message, resolved) => {
             resolved();
 
-            this.handleChatGPTAPIChat(message.contentText, message).catch(console.error);
+            return this.handleChatGPTAPIChat(message.contentText, message);
         }, { priority: MessagePriority.LOWEST });
     }
 
@@ -131,6 +134,92 @@ export default class ChatGPTController implements PluginController {
         this.chatGPTClient = new ChatGPTBrowserClient(clientOptions);
 
         this.DEFAULT_PROMPT = config.browser_api.prefix_prompt;
+    }
+
+    private async handleChatGPTChat(content: string, message: CommonReceivedMessage, shareWithGroup: boolean = false) {
+        if (this.chatGenerating) {
+            await message.sendReply('正在生成另一段对话，请稍后', true);
+            return;
+        }
+        if (content.trim() === '') {
+            await message.sendReply('说点什么啊', true);
+            return;
+        }
+
+        const sessionStore = shareWithGroup ? message.session.group : message.session.chat;
+        const userSessionStore = message.session.user;
+
+        // 使用频率限制
+        let rateLimitExpires = await userSessionStore.getRateLimit(this.SESSION_KEY_MESSAGE_COUNT, this.config.rate_limit, this.config.rate_limit_minutes * 60);
+        if (rateLimitExpires) {
+            let minutesLeft = Math.ceil(rateLimitExpires / 60);
+            await message.sendReply(`你的提问太多了，${minutesLeft}分钟后再问吧。`, true);
+            return;
+        }
+        await userSessionStore.addRequestCount(this.SESSION_KEY_MESSAGE_COUNT, this.config.rate_limit_minutes * 60);
+
+        let response: any;
+
+        let isFirstMessage = false;
+        let chatSession = await sessionStore.get<any>(this.SESSION_KEY_CHAT_SESSION);
+        if (!chatSession) {
+            isFirstMessage = true;
+            chatSession = {};
+        }
+
+        this.app.logger.debug('ChatGPT chatSession', chatSession);
+
+        const lowSpeedTimer = setTimeout(() => {
+            message.sendReply('生成对话速度较慢，请耐心等待', true);
+        }, 10 * 1000);
+
+        this.chatGenerating = true;
+        try {
+            if (!chatSession.conversationId) {
+                response = await this.chatGPTClient.sendMessage(this.DEFAULT_PROMPT + content);
+            } else {
+                response = await this.chatGPTClient.sendMessage(content, chatSession);
+            }
+        } catch (err: any) {
+            this.app.logger.error('ChatGPT error', err);
+            console.error(err);
+            if (err?.json?.detail) {
+                if (err.json.detail === 'Conversation not found') {
+                    await message.sendReply('对话已失效，请重新开始', true);
+                    await sessionStore.del(this.SESSION_KEY_CHAT_SESSION);
+                    return;
+                } else if (err.json.detail === 'Too many requests in 1 hour. Try again later.') {
+                    await message.sendReply('一小时内提问过多，过一小时再试试呗。', true);
+                }
+            }
+
+            await message.sendReply('生成对话失败: ' + err.toString(), true);
+            return;
+        } finally {
+            clearTimeout(lowSpeedTimer);
+            this.chatGenerating = false;
+        }
+
+        if (this.app.debug) {
+            this.app.logger.debug('ChatGPT response', JSON.stringify(response));
+        }
+
+        if (response.response) {
+            let reply: string = response.response ?? '';
+            reply = reply.replace(/\n\n/g, '\n');
+            /*
+            if (isFirstMessage) {
+                reply += '\n\n接下来的对话可以直接回复我。';
+            }
+            */
+
+            chatSession.conversationId = response.conversationId;
+            chatSession.parentMessageId = response.messageId;
+
+            await sessionStore.set(this.SESSION_KEY_CHAT_SESSION, chatSession, 600);
+
+            await message.sendReply(reply, true);
+        }
     }
 
     private async compressConversation(messageLogList: ChatGPTApiMessage[]) {
@@ -269,83 +358,8 @@ export default class ChatGPTController implements PluginController {
         throw new ChatGPTAPIError('API返回数据格式错误', 'api_response_data_invalid');
     }
 
-    private async handleChatGPTChat(content: string, message: CommonReceivedMessage, shareWithGroup: boolean = false) {
-        if (this.chatGenerating) {
-            message.sendReply('正在生成另一段对话，请稍后', true);
-            return;
-        }
-        if (content.trim() === '') {
-            message.sendReply('说点什么啊', true);
-            return;
-        }
-
-        const sessionStore = shareWithGroup ? message.session.group : message.session.chat;
-        let response: any;
-
-        let isFirstMessage = false;
-        let chatSession = await sessionStore.get<any>(this.SESSION_KEY_CHAT_SESSION);
-        if (!chatSession) {
-            isFirstMessage = true;
-            chatSession = {};
-        }
-
-        this.app.logger.debug('ChatGPT chatSession', chatSession);
-
-        const lowSpeedTimer = setTimeout(() => {
-            message.sendReply('生成对话速度较慢，请耐心等待', true);
-        }, 10 * 1000);
-
-        this.chatGenerating = true;
-        try {
-            if (!chatSession.conversationId) {
-                response = await this.chatGPTClient.sendMessage(this.DEFAULT_PROMPT + content);
-            } else {
-                response = await this.chatGPTClient.sendMessage(content, chatSession);
-            }
-        } catch (err: any) {
-            this.app.logger.error('ChatGPT error', err);
-            console.error(err);
-            if (err?.json?.detail) {
-                if (err.json.detail === 'Conversation not found') {
-                    message.sendReply('对话已失效，请重新开始', true);
-                    await sessionStore.del(this.SESSION_KEY_CHAT_SESSION);
-                    return;
-                } else if (err.json.detail === 'Too many requests in 1 hour. Try again later.') {
-                    message.sendReply('一小时内提问过多，过一小时再试试呗。', true);
-                }
-            }
-
-            message.sendReply('生成对话失败: ' + err.toString(), true);
-            return;
-        } finally {
-            clearTimeout(lowSpeedTimer);
-            this.chatGenerating = false;
-        }
-
-        if (this.app.debug) {
-            this.app.logger.debug('ChatGPT response', JSON.stringify(response));
-        }
-
-        if (response.response) {
-            let reply: string = response.response ?? '';
-            reply = reply.replace(/\n\n/g, '\n');
-            /*
-            if (isFirstMessage) {
-                reply += '\n\n接下来的对话可以直接回复我。';
-            }
-            */
-
-            chatSession.conversationId = response.conversationId;
-            chatSession.parentMessageId = response.messageId;
-
-            await sessionStore.set(this.SESSION_KEY_CHAT_SESSION, chatSession, 600);
-
-            message.sendReply(reply, true);
-        }
-    }
-
     private shouldSelfSuggestion(content: string): boolean {
-        if (content.match(/(我是|我只是|作为|我被设计成|只是).{0,15}(AI|语言模型|机器人|虚拟人物|虚拟助手|智能助手|人工智能|自然语言处理程序)/)) {
+        if (content.match(/(我是|我只是|作为|我被设计成|只是).{0,15}(AI|语言模型|机器人|虚拟人物|虚拟助手|智能助手|人工智能|自然语言处理)/)) {
             return true;
         }
         return false;
@@ -354,10 +368,21 @@ export default class ChatGPTController implements PluginController {
     private async handleChatGPTAPIChat(content: string, message: CommonReceivedMessage) {
         this.app.logger.debug(`ChatGPT API 收到提问。`);
         if (content.trim() === '') {
-            message.sendReply('说点什么啊', true);
+            await message.sendReply('说点什么啊', true);
             return;
         }
 
+        const userSessionStore = message.session.user;
+        // 使用频率限制
+        let rateLimitExpires = await userSessionStore.getRateLimit(this.SESSION_KEY_MESSAGE_COUNT, this.config.rate_limit, this.config.rate_limit_minutes * 60);
+        if (rateLimitExpires) {
+            let minutesLeft = Math.ceil(rateLimitExpires / 60);
+            await message.sendReply(`你的提问太多了，${minutesLeft}分钟后再问吧。`, true);
+            return;
+        }
+        await userSessionStore.addRequestCount(this.SESSION_KEY_MESSAGE_COUNT, this.config.rate_limit_minutes * 60);
+
+        // 获取记忆
         let messageLogList = await message.session.chat.get<ChatGPTApiMessage[]>(this.SESSION_KEY_API_CHAT_LOG);
         if (!Array.isArray(messageLogList)) {
             messageLogList = [];
@@ -368,7 +393,7 @@ export default class ChatGPTController implements PluginController {
             this.app.logger.debug(`提问占用Tokens：${questionTokens}`);
 
             if (questionTokens > this.config.openai_api.model_options.max_input_tokens) {
-                message.sendReply('消息过长，接受不了惹。', true);
+                await message.sendReply('消息过长，接受不了惹。', true);
                 return;
             }
 
@@ -403,7 +428,7 @@ export default class ChatGPTController implements PluginController {
             }, replyRes);
             await message.session.chat.set(this.SESSION_KEY_API_CHAT_LOG, messageLogList, this.config.openai_api.memory_expire);
 
-            message.sendReply(replyRes.message.replace(/\n\n/g, '\n'), true);
+            await message.sendReply(replyRes.message.replace(/\n\n/g, '\n'), true);
         } catch (err: any) {
             this.app.logger.error('ChatGPT error', err);
             console.error(err);
@@ -411,12 +436,12 @@ export default class ChatGPTController implements PluginController {
             if (err.name === 'HTTPError' && err.response) {
                 switch (err.response.statusCode) {
                     case 429:
-                        message.sendReply('提问太多了，过会儿再试试呗。', true);
+                        await message.sendReply('提问太多了，过会儿再试试呗。', true);
                         return;
                 }
             }
 
-            message.sendReply('生成对话失败: ' + err.toString(), true);
+            await message.sendReply('生成对话失败: ' + err.toString(), true);
             return;
         }
     }

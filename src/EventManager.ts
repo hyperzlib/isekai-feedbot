@@ -205,9 +205,16 @@ export class EventManager {
             }
 
             try {
-                await eventInfo.callback(...args, resolved);
+                const ret = await eventInfo.callback(...args, resolved);
                 if (isResolved) {
                     break;
+                }
+                // detect ret is promise
+                if (ret && typeof ret.catch === 'function') {
+                    ret.catch((err: any) => {
+                        this.app.logger.error(`事件 ${eventName} 处理失败: `, err);
+                        console.error(err);
+                    });
                 }
             } catch(err: any) {
                 this.app.logger.error(`事件 ${eventName} 处理失败: `, err);

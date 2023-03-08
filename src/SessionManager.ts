@@ -92,4 +92,45 @@ export class SessionStore implements Cache {
     get store() {
         return this.rootStore.store;
     }
+
+    /**
+     * 判断是否超过限流
+     * @param key 
+     * @param limit 
+     * @param ttl 
+     * @returns seconds to wait or false
+     */
+    public async getRateLimit(key: string, limit: number, ttl: number): Promise<number | false> {
+        const currentTime = Math.floor(new Date().getTime() / 1000);
+
+        let requestCountData = await this.get<{ startTime: number, count: number }>(key);
+        if (!requestCountData) {
+            return false;
+        }
+
+        if (requestCountData.count >= limit) {
+            return requestCountData.startTime + ttl - currentTime;
+        }
+        return false;
+    }
+
+    /**
+     * 为限流记录请求时间
+     * @param key 
+     * @param ttl 
+     */
+    public async addRequestCount(key: string, ttl: number) {
+        const currentTime = Math.floor(new Date().getTime() / 1000);
+        
+        let requestCountData = await this.get<{ startTime: number, count: number }>(key);
+        if (!requestCountData) {
+            requestCountData = {
+                startTime: currentTime,
+                count: 0
+            };
+        }
+        requestCountData.count ++;
+
+        await this.set(key, requestCountData, Math.max(1, requestCountData.startTime + ttl - currentTime));
+    }
 }
