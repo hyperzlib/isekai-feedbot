@@ -3,6 +3,7 @@ import { redisStore } from "cache-manager-ioredis-yet";
 
 import App from "./App";
 import { SessionConfig } from "./Config";
+import { RateLimitError } from "./error/errors";
 
 export class SessionManager {
     private app: App;
@@ -132,5 +133,20 @@ export class SessionStore implements Cache {
         requestCountData.count ++;
 
         await this.set(key, requestCountData, Math.max(1, requestCountData.startTime + ttl - currentTime));
+    }
+
+    /**
+     * 限流，如果超过限制则抛出异常
+     * @param key 
+     * @param limit 
+     * @param ttl 
+     * @param readOnly 仅读取，不记录请求
+     */
+    public async rateLimit(key: string, limit: number, ttl: number, readOnly = false): Promise<void> {
+        const waitTime = await this.getRateLimit(key, limit, ttl);
+        if (waitTime) {
+            throw new RateLimitError(waitTime);
+        }
+        await this.addRequestCount(key, ttl);
     }
 }

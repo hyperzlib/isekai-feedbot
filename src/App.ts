@@ -16,6 +16,9 @@ import { RobotManager } from './RobotManager';
 import { Service, ServiceManager } from './ServiceManager';
 import { SubscribeManager, Target } from './SubscribeManager';
 import { SessionManager } from './SessionManager';
+import { DatabaseManager } from './DatabaseManager';
+
+export * from './utils/contextHooks';
 
 export default class App {
     public config: Config;
@@ -28,6 +31,7 @@ export default class App {
     public logger!: winston.Logger;
     public event!: EventManager;
     public session!: SessionManager;
+    public database?: DatabaseManager;
     public robot!: RobotManager;
     public provider!: ProviderManager;
     public service!: ServiceManager;
@@ -40,6 +44,8 @@ export default class App {
         this.config = Yaml.parse(fs.readFileSync(configFile, { encoding: 'utf-8' }));
         this.debug = this.config.debug;
 
+        (import.meta as any)._isekaiFeedbotApp = this;
+
         this.initialize();
     }
 
@@ -48,6 +54,7 @@ export default class App {
         await this.initRestfulApiManager();
         await this.initEventManager();
         await this.initSessionManager();
+        await this.initDatabaseManager();
         await this.initRobot();
         await this.initProviderManager();
         await this.initServiceManager();
@@ -112,6 +119,13 @@ export default class App {
     async initSessionManager() {
         this.session = new SessionManager(this, this.config.session);
         await this.session.initialize();
+    }
+
+    async initDatabaseManager() {
+        if (this.config.db) {
+            this.database = new DatabaseManager(this, this.config.db);
+            await this.database.initialize();
+        }
     }
 
     async initRobot() {

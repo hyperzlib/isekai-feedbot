@@ -5,7 +5,7 @@ import App from "./App";
 import { MultipleMessage } from "./base/provider/BaseProvider";
 import { RobotConfig } from "./Config";
 import { CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage } from "./message/Message";
-import { GroupSender, SenderIdentity, UserSender } from "./message/Sender";
+import { GroupSender, ChatIdentity, UserSender } from "./message/Sender";
 import { CommandInfo } from "./PluginManager";
 import { RestfulApiManager, RestfulContext, RestfulRouter } from "./RestfulApiManager";
 import { SessionStore } from "./SessionManager";
@@ -19,9 +19,11 @@ export interface Robot {
     initialize?: () => Promise<any>;
     initRestfulApi?: (router: RestfulRouter, api: RestfulApiManager) => Promise<any>;
     setCommands?(commands: CommandInfo[]): Promise<any>;
+    sendTyping?(chatIdentity: ChatIdentity): Promise<boolean>;
     sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
     sendPushMessage(targets: Target[], message: string): Promise<any>;
-    getSession(senderIdentity: SenderIdentity, type: string): SessionStore;
+    deleteMessage?(chatIdentity: ChatIdentity, messageId: string): Promise<boolean>;
+    getSession(chatIdentity: ChatIdentity, type: string): SessionStore;
 }
 
 export class RobotManager {
@@ -116,7 +118,7 @@ export class RobotManager {
     }
 
     public getSenderIdentity(robot: Robot, message: CommonReceivedMessage) {
-        let sender: SenderIdentity = {
+        let sender: ChatIdentity = {
             robot: robot,
             type: 'raw',
         };
@@ -135,7 +137,7 @@ export class RobotManager {
         return sender;
     }
 
-    public getSessionPath(sender: SenderIdentity, type: string = 'chat'): string[] {
+    public getSessionPath(sender: ChatIdentity, type: string = 'chat'): string[] {
         if (type === 'global') { // 全局Session
             return ['global'];
         }

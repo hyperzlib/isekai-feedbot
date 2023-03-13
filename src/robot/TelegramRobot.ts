@@ -2,7 +2,7 @@ import TelegramBot from "node-telegram-bot-api";
 import App from "../App";
 import { RobotConfig } from "../Config";
 import { CommonSendMessage } from "../message/Message";
-import { SenderIdentity } from "../message/Sender";
+import { ChatIdentity } from "../message/Sender";
 import { CommandInfo } from "../PluginManager";
 import { Robot } from "../RobotManager";
 import { Target } from "../SubscribeManager";
@@ -77,8 +77,8 @@ export default class TelegramRobot implements Robot {
         */
     }
 
-    getSession(senderIdentity: SenderIdentity, type: string) {
-        const sessionPath = this.app.robot.getSessionPath(senderIdentity, type);
+    getSession(chatIdentity: ChatIdentity, type: string) {
+        const sessionPath = this.app.robot.getSessionPath(chatIdentity, type);
         return this.app.session.getStore(sessionPath);
     }
 

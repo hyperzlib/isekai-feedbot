@@ -1,7 +1,7 @@
 import App from "../App";
 import { BaseProvider, MultipleMessage } from "../base/provider/BaseProvider";
 import { ChannelConfig } from "../Config";
-import { ConfigCheckError } from "../error/ConfigCheckError";
+import { ConfigCheckError } from "../error/errors";
 import PusherService from "../service/PusherService";
 import { string, optional, object, guard } from "decoders";
 

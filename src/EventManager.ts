@@ -1,7 +1,8 @@
 import App from "./App";
 import { CommandOverrideConfig } from "./Config";
+import { PermissionDeniedError, RateLimitError } from "./error/errors";
 import { CommonReceivedMessage, CommonSendMessage } from "./message/Message";
-import { SenderIdentity } from "./message/Sender";
+import { ChatIdentity } from "./message/Sender";
 import { CommandInfo, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
 import { Robot } from "./RobotManager";
 
@@ -140,7 +141,7 @@ export class EventManager {
         }
     }
 
-    public async emit(eventName: string, senderInfo?: SenderIdentity | null, ...args: any[]) {
+    public async emit(eventName: string, senderInfo?: ChatIdentity | null, ...args: any[]) {
         if (this.app.debug) {
             if (args[0] instanceof CommonReceivedMessage) {
                 this.app.logger.debug(`触发事件 ${eventName} ${args[0].contentText}`);
@@ -159,6 +160,24 @@ export class EventManager {
         const resolved = () => {
             isResolved = true;
         };
+
+        const buildOnError = (eventInfo: ControllerEventInfo) => (error: Error) => {
+            this.app.logger.error(`${eventInfo.eventScope.controller?.id} 处理事件 ${eventName} 时出错`, error);
+            console.error(error);
+
+            for (let arg of args) {
+                if (arg instanceof CommonReceivedMessage) {
+                    const msg = arg;
+                    if (error instanceof RateLimitError) {
+                        const retryAfterMinutes = Math.ceil(error.retryAfter / 60);
+                        msg.sendReply(`使用太多了，${retryAfterMinutes}分钟后再试吧`);
+                    } else if (error instanceof PermissionDeniedError) {
+                        msg.sendReply(`使用此功能需要${error.requiredPermission}权限`);
+                    }
+                    break;
+                }
+            }
+        }
 
         let [subscribedControllers, disabledControllers] = this.getControllerSubscribe(senderInfo);
 
@@ -211,14 +230,10 @@ export class EventManager {
                 }
                 // detect ret is promise
                 if (ret && typeof ret.catch === 'function') {
-                    ret.catch((err: any) => {
-                        this.app.logger.error(`事件 ${eventName} 处理失败: `, err);
-                        console.error(err);
-                    });
+                    ret.catch(buildOnError(eventInfo));
                 }
             } catch(err: any) {
-                this.app.logger.error(`事件 ${eventName} 处理失败: `, err);
-                console.error(err);
+                buildOnError(eventInfo)(err);
             }
         }
         
@@ -304,7 +319,7 @@ export class EventManager {
         
     }
 
-    public getSenderInfo(message: CommonReceivedMessage): SenderIdentity {
+    public getSenderInfo(message: CommonReceivedMessage): ChatIdentity {
         if (message.origin === 'private') {
             return {
                 type: 'private',
@@ -326,7 +341,7 @@ export class EventManager {
         }
     }
 
-    public getControllerSubscribe(senderInfo?: SenderIdentity | null): [string[], string[]] {
+    public getControllerSubscribe(senderInfo?: ChatIdentity | null): [string[], string[]] {
         let subscribedCommands: string[] = [];
         let disabledCommands: string[] = [];
 

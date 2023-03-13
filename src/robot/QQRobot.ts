@@ -10,7 +10,7 @@ import { convertMessageToQQChunk, parseQQMessageChunk, QQGroupMessage, QQGroupSe
 import { CommonReceivedMessage, CommonSendMessage } from "../message/Message";
 import { PluginController } from "../PluginManager";
 import { RobotConfig } from "../Config";
-import { SenderIdentity } from "../message/Sender";
+import { ChatIdentity } from "../message/Sender";
 
 export type QQRobotConfig = RobotConfig & {
     uid: string;
@@ -211,8 +211,8 @@ export default class QQRobot implements Robot {
         return null;
     }
 
-    getSession(senderIdentity: SenderIdentity, type: string) {
-        const sessionPath = this.app.robot.getSessionPath(senderIdentity, type);
+    getSession(chatIdentity: ChatIdentity, type: string) {
+        const sessionPath = this.app.robot.getSessionPath(chatIdentity, type);
         return this.app.session.getStore(sessionPath);
     }
 
@@ -268,12 +268,18 @@ export default class QQRobot implements Robot {
 
         let msgData = await convertMessageToQQChunk(message);
 
+        let res: any = {};
         if (message.origin === 'private') {
             this.app.logger.debug('[DEBUG] 发送私聊消息', message.targetId, msgData);
-            await this.sendToUser(message.targetId, msgData);
+            res = await this.sendToUser(message.targetId, msgData);
         } else if (message.origin === 'group') {
             this.app.logger.debug('[DEBUG] 发送群消息', message.targetId, msgData);
-            await this.sendToGroup(message.targetId, msgData);
+            res = await this.sendToGroup(message.targetId, msgData);
+        }
+
+        // 保存 Message ID
+        if (res?.data?.message_id) {
+            message.id = res.data.message_id;
         }
 
         return message;
@@ -299,6 +305,13 @@ export default class QQRobot implements Robot {
         if (userList.length > 0) {
             await this.sendToUser(userList, message);
         }
+    }
+
+    async deleteMessage(chatIdentity: ChatIdentity, messageId: string): Promise<boolean> {
+        await this.doApiRequest('delete_msg', {
+            message_id: messageId
+        });
+        return true;
     }
 
     async getGroupList(): Promise<any[]> {

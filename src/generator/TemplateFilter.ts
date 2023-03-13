@@ -2,7 +2,7 @@ import Handlebars from "handlebars";
 
 import App from "../App";
 import { MultipleMessage } from "../base/provider/BaseProvider";
-import { ConfigCheckError } from "../error/ConfigCheckError";
+import { ConfigCheckError } from "../error/errors";
 
 export type TemplateFilterConfig = { [key: string]: string };
 

@@ -51,6 +51,7 @@ export default class ChatGPTController implements PluginController {
             browser_api: {
                 token: '',
                 cookies: '',
+                buffer_size: 100,
             },
             openai_api: {
                 token: '',
@@ -66,6 +67,7 @@ export default class ChatGPTController implements PluginController {
                     max_input_tokens: 1000,
                 }
             },
+            gatekeeper_url: '',
             rate_limit: 2,
             rate_limit_minutes: 5,
         }
@@ -145,6 +147,21 @@ export default class ChatGPTController implements PluginController {
             await message.sendReply('说点什么啊', true);
             return;
         }
+        if (this.config.gatekeeper_url) {
+            try {
+                let response = await got.post(this.config.gatekeeper_url, {
+                    json: {
+                        text: content,
+                    },
+                }).json<any>();
+                if (response.status == 1) {
+                    await message.sendReply(response.message, true);
+                    return;
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
 
         const sessionStore = shareWithGroup ? message.session.group : message.session.chat;
         const userSessionStore = message.session.user;
@@ -169,16 +186,44 @@ export default class ChatGPTController implements PluginController {
 
         this.app.logger.debug('ChatGPT chatSession', chatSession);
 
-        const lowSpeedTimer = setTimeout(() => {
+        let lowSpeedTimer: NodeJS.Timeout | null = setTimeout(() => {
             message.sendReply('生成对话速度较慢，请耐心等待', true);
         }, 10 * 1000);
 
         this.chatGenerating = true;
         try {
+            let buffer: string[] = [];
+            const flushBuffer = (force: boolean = false) => {
+                if (force || buffer.length > this.config.browser_api.buffer_size) {
+                    if (lowSpeedTimer) {
+                        clearInterval(lowSpeedTimer);
+                        lowSpeedTimer = null;
+                    }
+
+                    let content = buffer.join('').replace(/\n\n/g, '\n').trim();
+                    message.sendReply(content, true);
+                    buffer = [];
+                }
+            }
+            const onProgress = (text: string) => {
+                if (text.includes('\n')) {
+                    buffer.push(text);
+                    flushBuffer();
+                } else if (text === '[DONE]') {
+                    flushBuffer(true);
+                } else {
+                    buffer.push(text);
+                }
+            }
             if (!chatSession.conversationId) {
-                response = await this.chatGPTClient.sendMessage(this.DEFAULT_PROMPT + content);
+                response = await this.chatGPTClient.sendMessage(this.DEFAULT_PROMPT + content, {
+                    onProgress
+                });
             } else {
-                response = await this.chatGPTClient.sendMessage(content, chatSession);
+                response = await this.chatGPTClient.sendMessage(content, {
+                    ...chatSession,
+                    onProgress
+                });
             }
         } catch (err: any) {
             this.app.logger.error('ChatGPT error', err);
@@ -196,7 +241,11 @@ export default class ChatGPTController implements PluginController {
             await message.sendReply('生成对话失败: ' + err.toString(), true);
             return;
         } finally {
-            clearTimeout(lowSpeedTimer);
+            if (lowSpeedTimer) {
+                clearInterval(lowSpeedTimer);
+                lowSpeedTimer = null;
+            }
+
             this.chatGenerating = false;
         }
 
@@ -205,20 +254,10 @@ export default class ChatGPTController implements PluginController {
         }
 
         if (response.response) {
-            let reply: string = response.response ?? '';
-            reply = reply.replace(/\n\n/g, '\n');
-            /*
-            if (isFirstMessage) {
-                reply += '\n\n接下来的对话可以直接回复我。';
-            }
-            */
-
             chatSession.conversationId = response.conversationId;
             chatSession.parentMessageId = response.messageId;
 
             await sessionStore.set(this.SESSION_KEY_CHAT_SESSION, chatSession, 600);
-
-            await message.sendReply(reply, true);
         }
     }
 
@@ -370,6 +409,21 @@ export default class ChatGPTController implements PluginController {
         if (content.trim() === '') {
             await message.sendReply('说点什么啊', true);
             return;
+        }
+        if (this.config.gatekeeper_url) {
+            try {
+                let response = await got.post(this.config.gatekeeper_url, {
+                    json: {
+                        text: content,
+                    },
+                }).json<any>();
+                if (response.status == 1) {
+                    await message.sendReply(response.message, true);
+                    return;
+                }
+            } catch (e) {
+                console.error(e);
+            }
         }
 
         const userSessionStore = message.session.user;

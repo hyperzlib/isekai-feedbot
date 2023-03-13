@@ -10,6 +10,7 @@ export type Config = {
     robot: Record<string, RobotConfig>;
     service: Record<string, ServiceConfig>;
     session: SessionConfig;
+    db?: DatabaseConfig;
     http_api: RestfulApiConfig;
     command_override?: CommandOverrideConfig;
     focused_as_command?: true;
@@ -42,6 +43,12 @@ export type SessionConfig = {
     }
     ttl?: number
 };
+
+export type DatabaseConfig = {
+    url: string;
+    user?: string;
+    password?: string;
+}
 
 export type ChannelConfig = any;
 

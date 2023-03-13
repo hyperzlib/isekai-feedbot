@@ -8,7 +8,7 @@ import Yaml from 'yaml';
 import App from "./App";
 import EventEmitter from "events";
 import path from "path";
-import { SenderIdentity } from "./message/Sender";
+import { ChatIdentity } from "./message/Sender";
 import { Utils } from "./utils/Utils";
 
 export const MessagePriority = {
@@ -240,7 +240,7 @@ export class PluginManager extends EventEmitter {
      * @param senderInfo 
      * @returns 
      */
-    public getSubscribedControllers(senderInfo: SenderIdentity): PluginController[] {
+    public getSubscribedControllers(senderInfo: ChatIdentity): PluginController[] {
         let [subscribedControllers, disabledControllers] = this.app.event.getControllerSubscribe(senderInfo);
 
         return Object.values(this.controllers).filter((controller) => {
@@ -521,7 +521,7 @@ export class PluginEvent extends EventScope {
 
     public allowedRobotTypeList: AllowedList = '*';
     
-    public isAllowSubscribe: (source: SenderIdentity) => boolean = (source) => {
+    public isAllowSubscribe: (source: ChatIdentity) => boolean = (source) => {
         if (this.allowedRobotTypeList !== '*' && !this.allowedRobotTypeList.includes(source.robot.type)) {
             return false;
         }

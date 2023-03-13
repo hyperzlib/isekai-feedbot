@@ -15,6 +15,8 @@ export class UserSender implements BaseSender {
     public userName?: string;
     public nickName?: string;
 
+    public accessGroup: string[] = [];
+
     constructor(robot: Robot, uid: string) {
         this.robot = robot;
         this.uid = uid;
@@ -24,15 +26,14 @@ export class UserSender implements BaseSender {
         return new UserSender(robot, '');
     }
 
-
-    get identity(): SenderIdentity {
-        let senderIdentity: SenderIdentity = {
+    get identity(): ChatIdentity {
+        let chatIdentity: ChatIdentity = {
             type: 'private',
             robot: this.robot,
             userId: this.uid,
         };
 
-        return senderIdentity;
+        return chatIdentity;
     }
 
     get targetId() {
@@ -66,8 +67,8 @@ export class GroupSender {
         this.uid = uid;
     }
 
-    get identity(): SenderIdentity {
-        let senderIdentity: SenderIdentity = {
+    get identity(): ChatIdentity {
+        let chatIdentity: ChatIdentity = {
             type: 'group',
             robot: this.robot,
             groupId: this.groupId,
@@ -75,10 +76,10 @@ export class GroupSender {
         };
 
         if (this.rootGroupId) {
-            senderIdentity.rootGroupId = this.rootGroupId;
+            chatIdentity.rootGroupId = this.rootGroupId;
         }
 
-        return senderIdentity;
+        return chatIdentity;
     }
 
     get targetId() {
@@ -102,7 +103,7 @@ export class GroupSender {
     }
 }
 
-export type SenderIdentity = {
+export type ChatIdentity = {
     type: 'private' | 'group' | 'channel' | 'raw' | string,
     robot: Robot,
     rootGroupId?: string,
