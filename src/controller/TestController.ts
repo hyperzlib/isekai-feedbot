@@ -1,5 +1,7 @@
 import App from "../App";
+import { buildChatIdentityQuery, toChatIdentityEntity } from "../orm/Message";
 import { PluginController, PluginEvent } from "../PluginManager";
+import { TestSchema } from "./test/TestSchema";
 
 export default class TestController implements PluginController {
     public event!: PluginEvent;
@@ -16,44 +18,34 @@ export default class TestController implements PluginController {
     async initialize() {
         this.event.init(this);
 
-        this.event.registerCommand({
-            command: '写入全局',
-            name: '写入全局Session',
-        }, (args, message, resolve) => {
-            resolve();
+        const dbi = this.app.database;
+        if (!dbi) return;
 
-            message.session.global.set('_test', args);
-        });
+        const TestModel = dbi.getModel('Test', TestSchema);
 
         this.event.registerCommand({
-            command: '写入群组',
-            name: '写入群组Session',
+            command: '写入',
+            name: '写入数据库',
         }, (args, message, resolve) => {
             resolve();
+            
+            return (async () => {
+                let obj = new TestModel({
+                    chatIdentity: toChatIdentityEntity(message.sender.identity),
+                    data: args,
+                });
 
-            message.session.group.set('_test', args);
-        });
-
-        this.event.registerCommand({
-            command: '写入对话',
-            name: '写入对话Session',
-        }, (args, message, resolve) => {
-            resolve();
-
-            message.session.chat.set('_test', args);
+                await obj.save();
+            })();
         });
 
         this.event.registerCommand({
             command: '读取',
-            name: '读取Session',
+            name: '读取数据库',
         }, async (args, message, resolve) => {
             resolve();
 
-            let globalSession = await message.session.global.get('_test');
-            let groupSession = await message.session.group.get('_test');
-            let chatSession = await message.session.chat.get('_test');
-            
-            message.sendReply(`全局Session: ${globalSession}\n群组Session: ${groupSession}\n对话Session: ${chatSession}`);
+            let obj = await TestModel.findOne(buildChatIdentityQuery(message.sender.identity));
         });
     }
 }

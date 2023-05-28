@@ -30,7 +30,7 @@ export default class SfsettingsController implements PluginController {
         });
 
         this.event.registerCommand({
-            command: '随机',
+            command: '随机页面',
             name: '获取随机的百科页面',
             alias: ['随机词条', '随机页面'],
         }, (args, message, resolved) => {

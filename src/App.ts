@@ -184,6 +184,7 @@ export default class App {
      */
     async sendPushMessage(channelId: string, messages: MultipleMessage): Promise<void> {
         this.logger.info(`[${channelId}] 消息: `, messages);
+        console.log(messages);
         this.robot.sendPushMessage(channelId, messages);
     }
 }

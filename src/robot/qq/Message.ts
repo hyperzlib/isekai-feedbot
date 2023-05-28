@@ -12,7 +12,8 @@ export interface QQFaceMessage extends MessageChunk {
 export interface QQImageMessage extends MessageChunk {
     type: 'qqimage';
     data: {
-        url: string;
+        file?: string;
+        url?: string;
         alt?: string;
         subType?: string;
     };

@@ -24,3 +24,7 @@ export function useRobotManager() {
 export function useRestfulApiManager() {
     return useApp().restfulApi;
 }
+
+export function useDB() {
+    return useApp().database;
+}
