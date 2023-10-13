@@ -124,7 +124,7 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                     break;
                 case 'face':
                     if (chunkData.data?.id) {
-                        let emojiChar = qqFaceToEmoji(chunkData.data.id);
+                        let emojiChar = qqFaceToEmoji(parseInt(chunkData.data.id));
                         message.content.push({
                             type: ['emoji', 'qqface'],
                             text: emojiChar,

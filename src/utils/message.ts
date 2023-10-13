@@ -1,4 +1,4 @@
-import { MessageChunk } from "src/message/Message";
+import { MessageChunk } from "../message/Message";
 
 export class MessageUtils {
     

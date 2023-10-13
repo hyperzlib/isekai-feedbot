@@ -3,8 +3,8 @@ import { compareProps } from "../../utils/func";
 import QQRobot, { QQRobotConfig } from "../QQRobot";
 import { QQGroupSender, QQUserSender } from "./Message";
 import { GroupInfoType, GroupUserInfoType, UserInfoType } from "../../message/Sender";
-import { CommonMessage } from "src/message/Message";
-import { RobotStorage } from "src/storage/RobotStorage";
+import { CommonMessage } from "../../message/Message";
+import { RobotStorage } from "../../storage/RobotStorage";
 
 export type QQGroupInfo = {
     groupId: string,

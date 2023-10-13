@@ -6,11 +6,11 @@ import { CommonReceivedMessage } from "../message/Message";
 import { MessagePriority, PluginController, PluginEvent } from "../PluginManager";
 import got from "got/dist/source";
 import { RandomMessage } from "../utils/RandomMessage";
-import { QQForwardingMessage } from "src/robot/qq/Message";
-import QQRobot from "src/robot/QQRobot";
-import { ChatIdentity, UserSender } from "src/message/Sender";
-import { Utils } from "src/utils/Utils";
-import { MessageUtils } from "src/utils/message";
+import { QQForwardingMessage } from "../robot/qq/Message";
+import QQRobot from "../robot/QQRobot";
+import { ChatIdentity, UserSender } from "../message/Sender";
+import { Utils } from "../utils/Utils";
+import { MessageUtils } from "../utils/message";
 
 export type IsekaiBBSQuicklyPostConfig = {
     api_endpoint: string,

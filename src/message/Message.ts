@@ -2,8 +2,8 @@ import { Robot } from "../RobotManager";
 import { CacheStore } from "../CacheManager";
 import { MessageDataType, MessageSchemaType, chatIdentityToDB } from "../odm/Message";
 import { BaseSender, ChatIdentity, GroupSender, IMessageSender, UserSender } from "./Sender";
-import { LiteralUnion } from "src/utils/types";
-import { Utils } from "src/utils/Utils";
+import { LiteralUnion } from "../utils/types";
+import { Utils } from "../utils/Utils";
 
 export enum MessageDirection {
     RECEIVE = 1,
