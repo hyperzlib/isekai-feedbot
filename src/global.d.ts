@@ -5,3 +5,9 @@ interface ImportMeta {
         isekaiFeedbotApp: App;
     }
 }
+
+declare module "bson" {
+    interface ObjectId {
+      _id: this;
+    }
+}

@@ -1,54 +1,72 @@
 import { Robot } from "../RobotManager";
-import { SessionStore } from "../SessionManager";
-import { BaseSender, GroupSender, UserSender } from "./Sender";
+import { CacheStore } from "../CacheManager";
+import { MessageDataType, MessageSchemaType, chatIdentityToDB } from "../odm/Message";
+import { BaseSender, ChatIdentity, GroupSender, IMessageSender, UserSender } from "./Sender";
+import { LiteralUnion } from "src/utils/types";
+import { Utils } from "src/utils/Utils";
+
+export enum MessageDirection {
+    RECEIVE = 1,
+    SEND = 2,
+}
+
+export type MessageChunkType = LiteralUnion<"text" | "image" | "emoji" | "record" | "attachment" | "mention">;
 
 export interface MessageChunk {
-    type: string;
-    baseType?: string;
+    type: MessageChunkType[];
+    text: string | null;
     data: any;
 }
 
 export interface TextMessage extends MessageChunk {
-    type: 'text';
-    data: {
-        text: string;
-    };
+    text: string;
 }
 
 export interface ImageMessage extends MessageChunk {
-    type: 'image';
     data: {
         url: string;
         alt?: string;
     };
 }
 
-export interface VoiceMessage extends MessageChunk {
-    type: 'voice';
+export interface EmojiMessage extends MessageChunk {
+    data: {
+        emoji: string,
+        url?: string,
+    }
+}
+
+export interface RecordMessage extends MessageChunk {
     data: {
         url: string;
-        text?: string;
+        speech_to_text?: string;
     };
 }
 
 export interface AttachmentMessage extends MessageChunk {
-    type: 'attachment';
     data: {
         url: string;
         fileName: string;
+        size?: number;
     };
 }
 
 export interface MentionMessage extends MessageChunk {
-    type: 'mention';
     data: {
-        uid: string;
-        text?: string;
+        userId: string;
+        name?: string;
     };
 }
 
-export type CommonMessageType = "text" | "combine" | "image" | "media" | "toast";
-export type CommonMessageOrigin = "private" | "group" | "channel";
+export type CommonMessageType = LiteralUnion<"text" | "reference" | "image" | "record" | "media" | "toast">;
+export type CommonMessageChatType = LiteralUnion<"private" | "group" | "channel">;
+
+export enum AddReplyMode {
+    /** 不回复私聊 */
+    IGNORE_PRIVATE = 1,
+    /** 不回复没有被打断的对话 */
+    IGNORE_NO_INTERRUPTION = 2
+};
 
 /** 基本消息 */
 export class CommonMessage {
@@ -57,12 +75,14 @@ export class CommonMessage {
     /** 消息内容 */
     content: MessageChunk[] = [];
     /** 主类型 */
-    type: string | CommonMessageType = "text";
-    origin: string | CommonMessageOrigin = "private";
+    type: CommonMessageType = "text";
+    chatType: CommonMessageChatType = "private";
     /** 回复的消息ID */
     repliedId?: string;
     /** 提到的人 */
-    mentions?: { uid: string, text?: string }[];
+    mentions?: { userId: string, name?: string }[];
+    /** 已撤回 */
+    deleted: boolean = false;
 
     /** 附加信息 */
     extra: any = {};
@@ -72,12 +92,12 @@ export class CommonMessage {
     public get contentText() {
         if (typeof this._contentText === 'undefined') {
             this._contentText = this.content.map((chunk) => {
-                if (chunk.type === 'text') {
-                    return chunk.data.text;
-                } else if (chunk.type === 'mention') {
-                    return '[@' + (chunk.data.text || chunk.data.uid) + ']';
+                if (chunk.text !== null) {
+                    return chunk.text;
+                } else if (chunk.data) {
+                    return '<json>' + Utils.escapeHtml(JSON.stringify(chunk.data)) + '</json>';
                 } else {
-                    return JSON.stringify([chunk.type, chunk.data]);
+                    return '';
                 }
             }).join('').trim();
         }
@@ -86,50 +106,51 @@ export class CommonMessage {
 
     /**
      * 提到某人
-     * @param uid 用户ID
-     * @param text 显示的文本（部分接口支持）
+     * @param userId 用户ID
+     * @param name 显示的文本（部分接口支持）
      * @returns 
      */
-    public mention(uid: string, text?: string) {
+    public mention(userId: string, name?: string) {
         // 私聊消息不支持
-        if (this.origin === 'private') {
+        if (this.chatType === 'private') {
             return false;
         }
 
         if (typeof this.mentions === 'undefined') {
             this.mentions = [];
-        } else if (this.mentions!.find((u) => u.uid === uid)) {
+        } else if (this.mentions!.find((u) => u.userId === userId)) {
             return true;
         }
 
-        this.mentions.push({ uid, text });
+        this.mentions.push({ userId, name });
         this.content.unshift({
-            type: 'mention',
-            data: { uid, text }
+            type: ['mention'],
+            text: name ? `[@${name}]` : `[@${userId}]`,
+            data: { userId, name }
         });
         return true;
     }
 
     /**
      * 取消提到某人
-     * @param uid 用户ID
+     * @param userId 用户ID
      * @returns 
      */
-    public removeMention(uid: string) {
+    public removeMention(userId: string) {
         // 私聊消息不支持
-        if (this.origin === 'private') {
+        if (this.chatType === 'private') {
             return false;
         }
 
         if (typeof this.mentions === 'undefined') {
             return true;
         } else {
-            this.mentions = this.mentions.filter((u) => u.uid !== uid);
+            this.mentions = this.mentions.filter((u) => u.userId !== userId);
             if (this.mentions.length === 0) {
                 delete this.mentions;
             }
 
-            this.content = this.content.filter((msg) => msg.type !== 'mention' || msg.data?.uid !== uid);
+            this.content = this.content.filter((msg) => !msg.type.includes('mention') || msg.data?.userId !== userId);
 
             return true;
         }
@@ -144,17 +165,18 @@ export class CommonMessage {
         let lastText: string | undefined;
 
         this.content.forEach((chunk) => {
-            if (chunk.type === 'text') {
+            if (chunk.type.includes('text')) {
                 if (!lastText) {
-                    lastText = chunk.data.text;
+                    lastText = chunk.text ?? '';
                 } else {
-                    lastText += chunk.data.text;
+                    lastText += chunk.text ?? '';
                 }
             } else {
                 if (lastText) {
                     newContent.push({
-                        type: 'text',
-                        data: { text: lastText }
+                        type: ['text'],
+                        text: lastText,
+                        data: {},
                     });
                     lastText = undefined;
                 }
@@ -164,8 +186,9 @@ export class CommonMessage {
 
         if (lastText) {
             newContent.push({
-                type: 'text',
-                data: { text: lastText }
+                type: ['text'],
+                text: lastText,
+                data: {}
             });
         }
         
@@ -181,8 +204,8 @@ export class CommonMessage {
      */
     public static replace(content: MessageChunk[], searchValue: RegExp, replaceValue: string) {
         return content.map((chunk, index) => {
-            if (chunk.type === 'text') {
-                let newText: string = chunk.data.text;
+            if (chunk.type.includes('text')) {
+                let newText: string = chunk.text ?? '';
                 let offset = [0, 0];
                 if (index === 0) {
                     offset[0] = 1;
@@ -192,10 +215,14 @@ export class CommonMessage {
                     newText += "\t";
                 }
                 newText = newText.replace(searchValue, replaceValue);
-                chunk.data.text = newText.substring(offset[0], newText.length - offset[1]);
+                chunk.text = newText.substring(offset[0], newText.length - offset[1]);
             }
             return chunk;
         });
+    }
+
+    public toDBObject(): MessageDataType {
+        throw new Error("Not implemented.");
     }
 }
 
@@ -203,32 +230,52 @@ export class CommonMessage {
 export class CommonSendMessage extends CommonMessage {
     /** 发送者 */
     sender: Robot;
-    /** 接收方的ID */
-    targetId: string;
+    /** 接收者 */
+    receiver: ChatIdentity;
 
     /** 回复的消息 */
     repliedMessage?: CommonReceivedMessage;
 
-    constructor(sender: Robot, origin: string, targetId: string, content?: MessageChunk[]) {
+    /** 发送时间 */
+    time: Date = new Date();
+
+    constructor(sender: Robot, chatType: string, receiver: ChatIdentity, content?: MessageChunk[]) {
         super();
         this.sender = sender;
-        this.origin = origin;
-        this.targetId = targetId;
+        this.chatType = chatType;
+        this.receiver = receiver;
         if (Array.isArray(content)) this.content = content;
+        this.time = new Date();
     }
 
-    async send(): Promise<void> {
+    public async send(): Promise<void> {
         await this.sender.sendMessage(this);
+    }
+
+    public toDBObject(): MessageDataType {
+        return {
+            messageId: this.id!,
+            type: this.type,
+            direction: MessageDirection.SEND,
+            chatType: this.chatType,
+            chatIdentity: chatIdentityToDB(this.receiver),
+            repliedMessageId: this.repliedId,
+            mentionedUserIds: this.mentions?.map((item) => item.userId) ?? [],
+            contentText: this.contentText,
+            content: this.content,
+            time: this.time,
+            extra: this.extra,
+        };
     }
 }
 
 export type SessionStoreGroup = {
-    global: SessionStore;
-    robot: SessionStore;
-    user: SessionStore;
-    rootGroup: SessionStore;
-    group: SessionStore;
-    chat: SessionStore;
+    global: CacheStore;
+    robot: CacheStore;
+    user: CacheStore;
+    rootGroup: CacheStore;
+    group: CacheStore;
+    chat: CacheStore;
 };
 
 export class CommonReceivedMessage extends CommonMessage {
@@ -250,20 +297,22 @@ export class CommonReceivedMessage extends CommonMessage {
         },
     }) as any;
 
-    constructor(receiver: Robot, messageId?: string) {
+    constructor(receiver: Robot, sender: IMessageSender, messageId?: string) {
         super();
 
         this.receiver = receiver;
+        this.sender = sender;
         this.id = messageId;
     }
 
     public createReplyMessage(message?: string | MessageChunk[], addReply: boolean = false) {
         const sender = this.sender as BaseSender;
-        let newMessage = new CommonSendMessage(this.receiver!, this.origin, sender.targetId);
+        let newMessage = new CommonSendMessage(this.receiver!, this.chatType, sender.identity);
         if (typeof message === 'string') {
             let msgContent: MessageChunk[] = [{
-                type: 'text',
-                data: { text: message }
+                type: ['text'],
+                text: message,
+                data: {},
             }];
             newMessage.content = msgContent;
         } else if (Array.isArray(message)) {
@@ -278,36 +327,79 @@ export class CommonReceivedMessage extends CommonMessage {
         return newMessage;
     }
 
-    public async sendReply(message: string | MessageChunk[], addReply: boolean = false): Promise<CommonSendMessage | null> {
-        let newMessage = this.createReplyMessage(message, addReply);
+    public async sendReply(message: string | MessageChunk[], addReply: boolean | AddReplyMode = false, extra: any = {}): Promise<CommonSendMessage | null> {
+        // 检测是否添加回复和@
+        if (addReply === true) {
+            addReply = AddReplyMode.IGNORE_PRIVATE;
+        }
+
+        let shouldReply = false;
+        if (typeof addReply === 'number') {
+            shouldReply = true;
+            if (addReply & AddReplyMode.IGNORE_PRIVATE) {
+                // 忽略私聊
+                if (this.sender?.identity?.type === 'private') {
+                    shouldReply = false;
+                }
+            }
+        }
+
+        // 发送回复消息
+        let newMessage = this.createReplyMessage(message, shouldReply);
         if (newMessage.content.length === 0) return null;
+
+        newMessage.extra = {
+            ...newMessage.extra,
+            ...extra,
+        };
 
         newMessage = await this.receiver.sendMessage(newMessage);
 
         return newMessage;
     }
 
+    public async markRead() {
+        return await this.receiver.markRead?.(this);
+    }
+
     public getSession(type: string) {
         return this.receiver.getSession(this.sender.identity, type);
+    }
+
+    public toDBObject(): MessageDataType {
+        const chatIdentity = this.sender.identity;
+        return {
+            messageId: this.id!,
+            type: this.type,
+            direction: MessageDirection.SEND,
+            chatType: this.chatType,
+            chatIdentity: chatIdentityToDB(chatIdentity),
+            repliedMessageId: this.repliedId,
+            mentionedUserIds: this.mentions?.map((item) => item.userId) ?? [],
+            contentText: this.contentText,
+            content: this.content,
+            time: this.time,
+            extra: this.extra,
+        };
     }
 }
 
 export class CommonPrivateMessage<US extends UserSender> extends CommonReceivedMessage {
     public sender: US;
-    public origin = 'private';
+    public chatType = 'private';
 
     constructor(sender: US, receiver: Robot, messageId?: string) {
-        super(receiver, messageId);
+        super(receiver, sender, messageId);
         this.sender = sender;
     }
 }
 
 export class CommonGroupMessage<GS extends GroupSender = GroupSender> extends CommonReceivedMessage {
     sender: GS;
-    public origin = 'group';
+    public chatType = 'group';
 
     constructor(sender: GS, receiver: Robot, messageId?: string) {
-        super(receiver, messageId);
+        super(receiver, sender, messageId);
         this.sender = sender;
     }
 }

@@ -9,19 +9,23 @@ export function useLogger(): winston.Logger {
     return useApp().logger;
 }
 
-export function useEventManager() {
+export function useEvent() {
     return useApp().event;
 }
 
-export function useSessionManager() {
-    return useApp().session;
+export function useCache() {
+    return useApp().cache;
 }
 
-export function useRobotManager() {
+export function useStorage() {
+    return useApp().storage;
+}
+
+export function useRobot() {
     return useApp().robot;
 }
 
-export function useRestfulApiManager() {
+export function useRestfulApi() {
     return useApp().restfulApi;
 }
 

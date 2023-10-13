@@ -27,7 +27,7 @@ export default class SystemController implements PluginController {
         }, (args, message, resolved) => {
             resolved();
 
-            this.handleHelp(args, message);
+            this.handleHelp(args.param, message);
         });
     }
 
@@ -70,10 +70,9 @@ export default class SystemController implements PluginController {
         }
 
         replyMsg.content = [{
-            type: 'text',
-            data: {
-                text: helpBuilder.join('\n')
-            }
+            type: ['text'],
+            text: helpBuilder.join('\n'),
+            data: {},
         }];
         
         if (this.app.debug) {

@@ -1,43 +1,66 @@
-import { CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage, MentionMessage, MessageChunk, TextMessage } from "../../message/Message";
+import { AttachmentMessage, CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage, EmojiMessage, ImageMessage, MentionMessage, MessageChunk, TextMessage, RecordMessage } from "../../message/Message";
 import { GroupSender, UserSender } from "../../message/Sender";
 import QQRobot, { QQGroupInfo } from "../QQRobot";
+import { qqFaceToEmoji } from "./emojiMap";
 
-export interface QQFaceMessage extends MessageChunk {
-    type: 'qqface';
+export interface QQFaceMessage extends EmojiMessage {
+    type: ['emoji', 'qqface'];
     data: {
-        id: string
+        id: string,
+        emoji: string,
+        url?: string,
     };
 }
 
-export interface QQImageMessage extends MessageChunk {
-    type: 'qqimage';
+export interface QQImageMessage extends ImageMessage {
+    type: ['image', 'qqimage'];
     data: {
-        file?: string;
-        url?: string;
+        url: string;
         alt?: string;
+        file?: string;
         subType?: string;
     };
 }
 
-export interface QQVoiceMessage extends MessageChunk {
-    type: 'qqvoice';
+export interface QQRecordMessage extends RecordMessage {
+    type: ['record', 'qqrecord'];
     data: {
         url: string;
     };
 }
 
-export interface QQUrlMessage extends MessageChunk {
-    type: 'qqurl';
+export interface QQUrlMessage extends TextMessage {
+    type: ['text', 'qqurl'];
     data: {
         url: string;
         title: string;
     };
 }
 
+export interface QQAttachmentMessage extends AttachmentMessage {
+    type: ['attachement', 'qqattachment'];
+    data: {
+        sender_type: string;
+        sender_id: string;
+        url: string;
+        fileName: string;
+        size?: number;
+        file_id?: string;
+        busid?: number;
+    }
+}
+
+export interface QQForwardingMessage extends MessageChunk {
+    type: ['qqforwarding'];
+    data: {
+        res_id: string;
+    }
+}
+
 export class QQUserSender extends UserSender {
-    constructor(robot: QQRobot, uid: string) {
-        super(robot, uid);
-        this.userName = uid;
+    constructor(robot: QQRobot, userId: string) {
+        super(robot, userId);
+        this.userName = userId;
     }
 }
 
@@ -47,13 +70,13 @@ export class QQGroupSender extends GroupSender {
     public title?: string;
     public groupInfo?: QQGroupInfo;
 
-    constructor(robot: QQRobot, groupId: string, uid: string) {
-        super(robot, groupId, uid);
-        this.userName = uid;
+    constructor(robot: QQRobot, groupId: string, userId: string) {
+        super(robot, groupId, userId);
+        this.userName = userId;
     }
 
     get userSender() {
-        let sender = new QQUserSender(this.robot as any, this.uid);
+        let sender = new QQUserSender(this.robot as any, this.userId);
         sender.userName = this.userName;
         sender.nickName = this.globalNickName;
 
@@ -74,16 +97,15 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
             switch (chunkData.type) {
                 case 'text':
                     message.content.push({
-                        type: 'text',
-                        data: {
-                            text: chunkData.data?.text ?? ''
-                        }
+                        type: ['text'],
+                        text: chunkData.data?.text ?? '',
+                        data: {}
                     } as TextMessage);
                     break;
                 case 'image':
                     message.content.push({
-                        type: 'qqimage',
-                        baseType: 'image',
+                        type: ['image', 'qqimage'],
+                        text: '[图片]',
                         data: {
                             url: chunkData.data?.url ?? '',
                             alt: chunkData.data?.file,
@@ -93,32 +115,44 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                     break;
                 case 'record':
                     message.content.push({
-                        type: 'qqvoice',
-                        baseType: 'voice',
+                        type: ['record', 'qqrecord'],
+                        text: '[语音]',
                         data: {
                             url: chunkData.data?.url ?? '',
                         }
-                    } as QQVoiceMessage);
+                    } as QQRecordMessage);
                     break;
                 case 'face':
-                    message.content.push({
-                        type: 'qqface',
-                        data: {
-                            id: chunkData.data?.id ?? '',
-                        }
-                    } as QQFaceMessage);
+                    if (chunkData.data?.id) {
+                        let emojiChar = qqFaceToEmoji(chunkData.data.id);
+                        message.content.push({
+                            type: ['emoji', 'qqface'],
+                            text: emojiChar,
+                            data: {
+                                id: chunkData.data?.id ?? '',
+                                emoji: emojiChar,
+                            }
+                        } as QQFaceMessage);
+                    } else {
+                        message.content.push({
+                            type: ['text'],
+                            text: '[表情]',
+                            data: { }
+                        } as TextMessage);
+                    }
                     break;
                 case 'at':
                     if (chunkData.data?.qq) {
                         if (!willIgnoreMention) {
-                            if (chunkData.data.qq == bot.uid) { // 如果是@机器人
+                            if (chunkData.data.qq == bot.userId) { // 如果是@机器人
                                 message.mentionedReceiver = true;
                             } else { // @其他人的情况
                                 message.mention(chunkData.data.qq);
                                 message.content.push({
-                                    type: 'mention',
+                                    type: ['mention'],
+                                    text: `[@${chunkData.data.qq}]`,
                                     data: {
-                                        uid: chunkData.data.qq
+                                        userId: chunkData.data.qq,
                                     }
                                 } as MentionMessage);
                             }
@@ -133,19 +167,41 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                         willIgnoreMention = true; // 忽略下一个“@”
                     }
                     break;
+                case 'json':
+                    if (typeof chunkData.data?.data === 'string' && chunkData.data.data.length < 2048) {
+                        try {
+                            let jsonData = JSON.parse(chunkData.data.data);
+                            switch (jsonData.app) {
+                                case 'com.tencent.multimsg':
+                                    console.log('forwarding message', chunkData.data.data);
+                                    if (jsonData.meta?.detail?.resid) {
+                                        message.content.push({
+                                            type: ['qqforwarding'],
+                                            text: '[合并转发消息]',
+                                            data: {
+                                                res_id: jsonData.meta.detail.resid
+                                            }
+                                        } as QQForwardingMessage);
+                                    }
+                            }
+                        } catch (_) { }
+                    }
+                    break;
+                default:
+                    console.log('unknown message', chunkData);
             }
         }
     });
 
     if (message.content.length === 1) {
         // 检查单一消息的类型
-        switch (message.content[0].type) {
-            case 'qqimage':
-                message.type = 'image';
-                break;
-            case 'qqvoice':
-                message.type = 'voice';
-                break;
+        const firstChunk = message.content[0];
+        if (firstChunk.type.includes('qqimage')) {
+            message.type = 'image';
+        } else if (firstChunk.type.includes('qqrecord')) {
+            message.type = 'record';
+        } else if (firstChunk.type.includes('qqforwarding')) {
+            message.type = 'reference';
         }
     }
 
@@ -157,75 +213,70 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
 
     message.content.forEach((rawChunk) => {
         let chunk = rawChunk;
-        if (rawChunk.baseType && !rawChunk.type.startsWith('qq')) {
-            chunk = {
-                ...rawChunk,
-                type: rawChunk.baseType,
-            };
-        }
 
-        switch (chunk.type) {
-            case 'text':
-                msgChunk.push({
-                    type: 'text',
-                    data: {
-                        text: chunk.data.text
-                    }
-                });
-                break;
-            case 'qqface':
-                msgChunk.push({
-                    type: 'face',
-                    data: { id: chunk.data.id }
-                });
-                break;
-            case 'image':
-            case 'qqimage':
-                msgChunk.push({
-                    type: 'image',
-                    data: {
-                        file: chunk.data.url,
-                        subType: chunk.data.subType ?? 0
-                    }
-                });
-                break;
-            case 'voice':
-            case 'qqvoice':
-                msgChunk.push({
-                    type: 'record',
-                    data: {
-                        file: chunk.data.url
-                    }
-                });
-                break;
-            case 'mention':
-                msgChunk.push({
-                    type: 'at',
-                    data: {
-                        qq: chunk.data.uid
-                    }
-                });
-                break;
+        if (chunk.type.includes('text')) {
+            msgChunk.push({
+                type: 'text',
+                data: {
+                    text: chunk.text
+                }
+            });
+        } else if (chunk.type.includes('qqface')) {
+            msgChunk.push({
+                type: 'face',
+                data: { id: chunk.data.id }
+            });
+        } else if (chunk.type.includes('image')) {
+            msgChunk.push({
+                type: 'image',
+                data: {
+                    file: chunk.data.url,
+                    subType: chunk.data.subType ?? 0
+                }
+            });
+        } else if (chunk.type.includes('record')) {
+            msgChunk.push({
+                type: 'record',
+                data: {
+                    file: chunk.data.url
+                }
+            });
+        } else if (chunk.type.includes('mention')) {
+            msgChunk.push({
+                type: 'at',
+                data: { qq: chunk.data.userId }
+            });
+        } else if (chunk.type.includes('qqforwarding')) {
+            // ignore
+        } else if (chunk.text !== null) {
+            msgChunk.push({
+                type: 'text',
+                data: {
+                    text: chunk.text
+                }
+            });
         }
-    })
+    });
 
     if (message.repliedId) {
-        if (message.origin === 'group' && message.repliedMessage?.sender.uid) {
-            // 目前不知道为何，@不能正常传递
-            /*
-            msgChunk.unshift({
-                type: 'text',
-                data: { text: ' ' }
-            });
+        if (message.chatType === 'group' && message.repliedMessage?.sender.userId) {
+            // go-cqhttp需要连续发送两个@才能显示出来
+            // msgChunk.unshift({
+            //     type: 'text',
+            //     data: { text: ' ' }
+            // });
             msgChunk.unshift({
                 type: 'at',
-                data: { qq: message.repliedMessage.sender.uid }
+                data: { qq: message.repliedMessage.sender.userId }
             });
+            // msgChunk.unshift({
+            //     type: 'text',
+            //     data: { text: ' ' }
+            // });
             msgChunk.unshift({
-                type: 'text',
-                data: { text: ' ' }
+                type: 'at',
+                data: { qq: message.repliedMessage.sender.userId }
             });
-            */
         }
         msgChunk.unshift({
             type: 'reply',

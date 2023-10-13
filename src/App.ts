@@ -15,7 +15,8 @@ import { RestfulApiManager } from './RestfulApiManager';
 import { RobotManager } from './RobotManager';
 import { Service, ServiceManager } from './ServiceManager';
 import { SubscribeManager, Target } from './SubscribeManager';
-import { SessionManager } from './SessionManager';
+import { CacheManager } from './CacheManager';
+import { StorageManager } from './StorageManager';
 import { DatabaseManager } from './DatabaseManager';
 
 export * from './utils/contextHooks';
@@ -30,7 +31,8 @@ export default class App {
 
     public logger!: winston.Logger;
     public event!: EventManager;
-    public session!: SessionManager;
+    public cache!: CacheManager;
+    public storage!: StorageManager;
     public database?: DatabaseManager;
     public robot!: RobotManager;
     public provider!: ProviderManager;
@@ -53,7 +55,8 @@ export default class App {
         await this.initModules();
         await this.initRestfulApiManager();
         await this.initEventManager();
-        await this.initSessionManager();
+        await this.initCacheManager();
+        await this.initStorageManager();
         await this.initDatabaseManager();
         await this.initRobot();
         await this.initProviderManager();
@@ -116,9 +119,14 @@ export default class App {
         await this.event.initialize();
     }
 
-    async initSessionManager() {
-        this.session = new SessionManager(this, this.config.session);
-        await this.session.initialize();
+    async initCacheManager() {
+        this.cache = new CacheManager(this, this.config.cache);
+        await this.cache.initialize();
+    }
+
+    async initStorageManager() {
+        this.storage = new StorageManager(this, this.config.storage);
+        await this.storage.initialize();
     }
 
     async initDatabaseManager() {

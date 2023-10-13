@@ -4,26 +4,38 @@ import path from "path";
 import App from "./App";
 import { MultipleMessage } from "./base/provider/BaseProvider";
 import { RobotConfig } from "./Config";
-import { CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage } from "./message/Message";
-import { GroupSender, ChatIdentity, UserSender } from "./message/Sender";
+import { CommonGroupMessage, CommonMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage, MessageChunk } from "./message/Message";
+import { GroupSender, ChatIdentity, UserSender, UserInfoType, GroupInfoType, RootGroupInfoType, ChannelInfoType, GroupUserInfoType } from "./message/Sender";
 import { CommandInfo } from "./PluginManager";
 import { RestfulApiManager, RestfulContext, RestfulRouter } from "./RestfulApiManager";
-import { SessionStore } from "./SessionManager";
+import { CacheStore } from "./CacheManager";
 import { Target } from "./SubscribeManager";
+import { MessageSchemaType } from "./odm/Message";
 
 export interface Robot {
     type: string;
     robotId?: string;
-    uid?: string;
+    userId?: string;
     description?: string;
     initialize?: () => Promise<any>;
+    destroy?: () => Promise<any>;
     initRestfulApi?: (router: RestfulRouter, api: RestfulApiManager) => Promise<any>;
     setCommands?(commands: CommandInfo[]): Promise<any>;
+    markRead?(message: CommonReceivedMessage): Promise<boolean>;
     sendTyping?(chatIdentity: ChatIdentity): Promise<boolean>;
     sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
     sendPushMessage(targets: Target[], message: string): Promise<any>;
     deleteMessage?(chatIdentity: ChatIdentity, messageId: string): Promise<boolean>;
-    getSession(chatIdentity: ChatIdentity, type: string): SessionStore;
+    getSession(chatIdentity: ChatIdentity, type: string): CacheStore;
+    ensureMediaUrl?(mediaMessageChunk: MessageChunk): Promise<void>;
+    
+    getUsersInfo?(userIds: string[]): Promise<(UserInfoType | null)[]>;
+    getGroupInfo?(groupId: string, rootGroupId?: string): Promise<GroupInfoType | null>;
+    getRootGroupInfo?(rootGroupId: string): Promise<RootGroupInfoType | null>;
+    getChannelInfo?(channelId: string): Promise<ChannelInfoType | null>;
+    getGroupUsersInfo?(userIds: string[], groupId: string, rootGroupId?: string): Promise<(GroupUserInfoType | null)[]>;
+
+    parseDBMessage?(dbMessage: MessageSchemaType): Promise<CommonMessage>;
 }
 
 export class RobotManager {
@@ -74,12 +86,16 @@ export class RobotManager {
                 try {
                     let robotObject: Robot = new robotClass(this.app, robotId, robotConfig);
 
+                    this.robots[robotId] = robotObject;
+
                     await robotObject.initialize?.();
                     await robotObject.initRestfulApi?.(this.app.restfulApi.getRobotRouter(robotId), this.app.restfulApi);
 
-                    this.robots[robotId] = robotObject;
                     this.app.logger.info(`已加载Robot: ${robotId}`);
                 } catch(err) {
+                    if (robotId in this.robots) {
+                        delete this.robots[robotId];
+                    }
                     console.error(`无法加载 ${robotId} Robot: `, err);
                 }
             } else {
@@ -125,11 +141,11 @@ export class RobotManager {
         if (message instanceof CommonPrivateMessage) {
             const messageSender = message.sender as UserSender;
             sender.type = 'private';
-            sender.userId = messageSender.uid;
+            sender.userId = messageSender.userId;
         } else if (message instanceof CommonGroupMessage) {
             const messageSender = message.sender as GroupSender;
             sender.type = 'group';
-            sender.userId = messageSender.uid;
+            sender.userId = messageSender.userId;
             sender.groupId = messageSender.groupId;
             sender.rootGroupId = messageSender.rootGroupId;
         }
@@ -177,5 +193,9 @@ export class RobotManager {
         }
 
         throw new Error(`Unknown session type: ${type}`);
+    }
+
+    public getRobot(robotId: string): Robot | null {
+        return this.robots[robotId] ?? null;
     }
 }

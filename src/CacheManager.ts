@@ -2,16 +2,16 @@ import { caching, Cache } from "cache-manager";
 import { redisStore } from "cache-manager-ioredis-yet";
 
 import App from "./App";
-import { SessionConfig } from "./Config";
+import { CacheConfig as CacheConfig } from "./Config";
 import { RateLimitError } from "./error/errors";
 
-export class SessionManager {
+export class CacheManager {
     private app: App;
-    private config: SessionConfig;
+    private config: CacheConfig;
 
     private store!: Cache;
 
-    constructor(app: App, config: SessionConfig) {
+    constructor(app: App, config: CacheConfig) {
         this.app = app;
         this.config = config;
     }
@@ -29,27 +29,27 @@ export class SessionManager {
             };
             this.app.logger.debug('Redis Store 配置: ' + JSON.stringify(cacheOption));
             this.store = await caching(await redisStore(cacheOption));
-            this.app.logger.info(`使用Redis作为SessionStore`);
+            this.app.logger.info(`使用Redis作为CacheStore`);
         } else {
             let cacheOption = {
                 ttl: (this.config.ttl ?? 600) * 1000
             };
             this.store = await caching('memory', cacheOption);
-            this.app.logger.info(`使用内存数据库作为SessionStore`);
+            this.app.logger.info(`使用内存数据库作为CacheStore`);
         }
     }
 
     /**
-     * 获取命名的SessionStore
+     * 获取命名的CacheStore
      * @param path 
      * @returns 
      */
-    public getStore(path: string[]): SessionStore {
-        return new SessionStore(this.store, path);
+    public getStore(path: string[]): CacheStore {
+        return new CacheStore(this.store, path);
     }
 }
 
-export class SessionStore implements Cache {
+export class CacheStore implements Cache {
     rootStore: Cache;
     prefix: string;
 
@@ -62,7 +62,11 @@ export class SessionStore implements Cache {
         }
     }
 
-    public set(key: string, value: unknown, ttl?: number | undefined) {
+    public makeKey(path: string[]): string {
+        return path.join(':');
+    }
+
+    public set(key: string, value: unknown, ttl?: number | undefined): Promise<void> {
         if (typeof ttl === 'undefined') {
             return this.rootStore.set(this.prefix + key, value);
         } else {
@@ -70,11 +74,11 @@ export class SessionStore implements Cache {
         }
     }
 
-    public get<T>(key: string) {
+    public get<T>(key: string): Promise<T | undefined> {
         return this.rootStore.get<T>(this.prefix + key);
     }
 
-    public del(key: string) {
+    public del(key: string): Promise<void> {
         return this.rootStore.del(this.prefix + key);
     }
 
@@ -82,7 +86,7 @@ export class SessionStore implements Cache {
         return this.rootStore.store.del(this.prefix + '*');
     }
 
-    wrap<T>(key: string, fn: () => Promise<T>, ttl?: number | undefined) {
+    wrap<T>(key: string, fn: () => Promise<T>, ttl?: number | undefined): Promise<T> {
         if (typeof ttl === 'undefined') {
             return this.rootStore.wrap(this.prefix + key, fn);
         } else {
@@ -120,7 +124,7 @@ export class SessionStore implements Cache {
      * @param key 
      * @param ttl 
      */
-    public async addRequestCount(key: string, ttl: number) {
+    public async addRequestCount(key: string, ttl: number): Promise<void> {
         const currentTime = Math.floor(new Date().getTime() / 1000);
         
         let requestCountData = await this.get<{ startTime: number, count: number }>(key);
@@ -147,6 +151,8 @@ export class SessionStore implements Cache {
         if (waitTime) {
             throw new RateLimitError(waitTime);
         }
-        await this.addRequestCount(key, ttl);
+        if (!readOnly) {
+            await this.addRequestCount(key, ttl);
+        }
     }
 }

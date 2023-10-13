@@ -29,7 +29,7 @@ export default class IsekaiWikiController implements PluginController {
         }, (args, message, resolved) => {
             resolved();
 
-            wikiMisc.handleSearch(args, message);
+            wikiMisc.handleSearch(args.param, message);
         });
 
         this.event.registerCommand({
@@ -39,7 +39,7 @@ export default class IsekaiWikiController implements PluginController {
         }, (args, message, resolved) => {
             resolved();
 
-            wikiMisc.handleRandomPage(args, message);
+            wikiMisc.handleRandomPage(args.param, message);
         });
     }
 }

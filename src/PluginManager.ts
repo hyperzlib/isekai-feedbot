@@ -48,8 +48,13 @@ export type EventListenerInfo = {
     callback: CallableFunction;
 }
 
+export type CommandInputArgs = {
+    command: string,
+    param: string,
+}
+
 export type MessageCallback = (message: CommonReceivedMessage, resolved: VoidFunction) => any;
-export type CommandCallback = (args: string, message: CommonReceivedMessage, resolved: VoidFunction) => any;
+export type CommandCallback = (args: CommandInputArgs, message: CommonReceivedMessage, resolved: VoidFunction) => any;
 export type RawEventCallback = (robot: Robot, event: any, resolved: VoidFunction) => any;
 
 export type AllowedList = string[] | '*';

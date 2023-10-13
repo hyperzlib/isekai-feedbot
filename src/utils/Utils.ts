@@ -71,4 +71,65 @@ export class Utils {
             fs.mkdirSync(path, { recursive: true });
         }
     }
+
+    static isLatinChar(char: string | number): boolean {
+        const charCodeMap = {
+            a: 'a'.charCodeAt(0),
+            z: 'z'.charCodeAt(0),
+            A: 'A'.charCodeAt(0),
+            Z: 'Z'.charCodeAt(0),
+            0: '0'.charCodeAt(0),
+            9: '9'.charCodeAt(0),
+        };
+
+        if (typeof char === 'string') {
+            char = char.charCodeAt(0);
+        }
+
+        return (char >= charCodeMap.a && char <= charCodeMap.z) ||
+            (char >= charCodeMap.A && char <= charCodeMap.Z) ||
+            (char >= charCodeMap['0'] && char <= charCodeMap['9']);
+    } 
+
+    /**
+     * 计算字符串中的汉字和单词数量
+     */
+    static countWord(text: string): number {
+        text = text.trim();
+
+        if (text === '') {
+            return 0;
+        }
+
+        let wordCount = 0;
+        let charCode: number = 0;
+        let prevCharCode: number = 0;
+        for (let i = 0; i < text.length; i++) {
+            charCode = text.charCodeAt(i);
+            if (i !== 0) {
+                prevCharCode = text.charCodeAt(i - 1);
+            }
+            if (charCode > 255) {
+                wordCount ++;
+            } else {
+                if (Utils.isLatinChar(charCode) && !Utils.isLatinChar(prevCharCode)) {
+                    wordCount ++;
+                }
+            }
+        }
+        
+        return wordCount + 1;
+    }
+
+    static escapeHtml(text: string) {
+        return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    static unescapeHtml(text: string) {
+        return text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    }
+
+    static escapeMarkdown(text: string) {
+        return text.replace(/([\\`*_{}[\]()#+\-.!])/g, '\\$1');
+    }
 }

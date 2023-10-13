@@ -18,7 +18,7 @@ export default class TelegramRobot implements Robot {
 
     public type = 'telegram';
     public robotId: string;
-    public uid?: string;
+    public userId?: string;
     public description: string;
 
     private bot: TelegramBot;
@@ -79,7 +79,7 @@ export default class TelegramRobot implements Robot {
 
     getSession(chatIdentity: ChatIdentity, type: string) {
         const sessionPath = this.app.robot.getSessionPath(chatIdentity, type);
-        return this.app.session.getStore(sessionPath);
+        return this.app.cache.getStore(sessionPath);
     }
 
     /**

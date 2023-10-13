@@ -9,7 +9,8 @@ export type Config = {
     debug: boolean;
     robot: Record<string, RobotConfig>;
     service: Record<string, ServiceConfig>;
-    session: SessionConfig;
+    cache: CacheConfig;
+    storage: StorageConfig;
     db?: DatabaseConfig;
     http_api: RestfulApiConfig;
     command_override?: CommandOverrideConfig;
@@ -33,7 +34,7 @@ export type RestfulApiConfig = {
 
 export type ServiceConfig = { [name: string]: any };
 
-export type SessionConfig = {
+export type CacheConfig = {
     type?: 'memory' | 'redis',
     redis?: {
         host?: string,
@@ -48,7 +49,14 @@ export type DatabaseConfig = {
     url: string;
     user?: string;
     password?: string;
-}
+};
+
+export type StorageConfig = {
+    cache_ttl?: number;
+    message?: {
+        lru_limit?: number;
+    };
+};
 
 export type ChannelConfig = any;
 

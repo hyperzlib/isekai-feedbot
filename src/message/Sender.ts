@@ -1,3 +1,4 @@
+import { any } from "micromatch";
 import { Robot } from "../RobotManager";
 
 export type BaseSenderType = "user" | "group" | "channel";
@@ -5,21 +6,25 @@ export type BaseSenderType = "user" | "group" | "channel";
 export interface BaseSender {
     readonly type: string | BaseSenderType;
     readonly targetId: string;
+    readonly userId: string;
+    readonly identity: ChatIdentity;
 }
+
+export type IMessageSender = BaseSender & Record<string, any>;
 
 export class UserSender implements BaseSender {
     public robot: Robot;
 
     public readonly type = "user";
-    public uid: string;
+    public userId: string;
     public userName?: string;
     public nickName?: string;
 
     public accessGroup: string[] = [];
 
-    constructor(robot: Robot, uid: string) {
+    constructor(robot: Robot, userId: string) {
         this.robot = robot;
-        this.uid = uid;
+        this.userId = userId;
     }
 
     static newAnonymous(robot: Robot) {
@@ -30,18 +35,18 @@ export class UserSender implements BaseSender {
         let chatIdentity: ChatIdentity = {
             type: 'private',
             robot: this.robot,
-            userId: this.uid,
+            userId: this.userId,
         };
 
         return chatIdentity;
     }
 
     get targetId() {
-        return this.uid;
+        return this.userId;
     }
 
     get displayName() {
-        return this.nickName ?? this.userName ?? this.uid;
+        return this.nickName ?? this.userName ?? this.userId;
     }
 }
 
@@ -56,15 +61,15 @@ export class GroupSender {
     public rootGroupId?: string;
     public rootGroupName?: string;
 
-    public uid: string;
+    public userId: string;
     public userName?: string;
     public globalNickName?: string;
     public nickName?: string;
 
-    constructor(robot: Robot, groupId: string, uid: string) {
+    constructor(robot: Robot, groupId: string, userId: string) {
         this.robot = robot;
         this.groupId = groupId;
-        this.uid = uid;
+        this.userId = userId;
     }
 
     get identity(): ChatIdentity {
@@ -72,7 +77,7 @@ export class GroupSender {
             type: 'group',
             robot: this.robot,
             groupId: this.groupId,
-            userId: this.uid,
+            userId: this.userId,
         };
 
         if (this.rootGroupId) {
@@ -91,11 +96,11 @@ export class GroupSender {
     }
 
     get displayName() {
-        return this.nickName ?? this.globalNickName ?? this.userName ?? this.uid;
+        return this.nickName ?? this.globalNickName ?? this.userName ?? this.userId;
     }
 
     get userSender() {
-        let sender = new UserSender(this.robot, this.uid);
+        let sender = new UserSender(this.robot, this.userId);
         sender.userName = this.userName;
         sender.nickName = this.globalNickName;
         
@@ -103,11 +108,53 @@ export class GroupSender {
     }
 }
 
-export type ChatIdentity = {
-    type: 'private' | 'group' | 'channel' | 'raw' | string,
-    robot: Robot,
-    rootGroupId?: string,
-    groupId?: string,
-    userId?: string,
-    channelId?: string,
+export interface ChatIdentity {
+    type: ('private' | 'group' | 'channel' | 'raw') | (string & {});
+    robot: Robot;
+    rootGroupId?: string;
+    groupId?: string;
+    userId?: string;
+    channelId?: string;
+}
+
+export interface UserInfoType {
+    userId: string;
+    userName?: string;
+    nickName?: string;
+    image?: string;
+    extra: any;
+}
+
+export interface GroupInfoType {
+    groupId: string;
+    rootGroupId?: string;
+    name: string;
+    image?: string;
+    extra: any;
+}
+
+export interface RootGroupInfoType {
+    rootGroupId: string;
+    name: string;
+    image?: string;
+    extra: any;
+}
+
+export interface GroupUserInfoType {
+    groupId: string;
+    rootGroupId?: string;
+    userId: string;
+    userName?: string;
+    nickName?: string;
+    title?: string;
+    role?: string;
+    image?: string;
+    extra: any;
+}
+
+export interface ChannelInfoType {
+    channelId: string;
+    name: string;
+    image: string;
+    extra: any;
 }

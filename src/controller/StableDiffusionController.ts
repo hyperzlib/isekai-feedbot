@@ -1,5 +1,5 @@
 import App from "../App";
-import { CommonReceivedMessage } from "../message/Message";
+import { CommonReceivedMessage, ImageMessage } from "../message/Message";
 import { MessagePriority, PluginController, PluginEvent } from "../PluginManager";
 import got from "got/dist/source";
 
@@ -94,7 +94,7 @@ export default class StableDiffusionController implements PluginController {
         }, (args, message, resolve) => {
             resolve();
 
-            return this.text2img(args, message);
+            return this.text2img(args.param, message);
         });
         
         this.event.registerCommand({
@@ -103,7 +103,7 @@ export default class StableDiffusionController implements PluginController {
         }, (args, message, resolve) => {
             resolve();
 
-            return this.text2img(args, message, {
+            return this.text2img(args.param, message, {
                 useTranslate: true
             });
         });
@@ -371,11 +371,12 @@ export default class StableDiffusionController implements PluginController {
                 
                 await currentTask.message.sendReply([
                     {
-                        type: 'image',
+                        type: ['image'],
+                        text: '[图片]',
                         data: {
                             url: "base64://" + image,
                         }
-                    }
+                    } as ImageMessage
                 ], false);
             }
         } catch (e: any) {

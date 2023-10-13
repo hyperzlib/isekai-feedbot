@@ -3,7 +3,7 @@ import { CommandOverrideConfig } from "./Config";
 import { PermissionDeniedError, RateLimitError } from "./error/errors";
 import { CommonReceivedMessage, CommonSendMessage } from "./message/Message";
 import { ChatIdentity } from "./message/Sender";
-import { CommandInfo, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
+import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
 import { Robot } from "./RobotManager";
 
 export type ControllerEventInfo = {
@@ -243,7 +243,7 @@ export class EventManager {
     public async emitMessage(message: CommonReceivedMessage) {
         let isResolved = false;
 
-        if (message.origin === 'private' || (message.origin === 'group' && message.mentionedReceiver)) {
+        if (message.chatType === 'private' || (message.chatType === 'group' && message.mentionedReceiver)) {
             if (this.app.config.focused_as_command) {
                 isResolved = await this.emitCommand(message.contentText, message);
                 if (isResolved) return true;
@@ -253,7 +253,7 @@ export class EventManager {
             if (isResolved) return true;
         }
 
-        isResolved = await this.emit(`message/${message.origin}`, this.getSenderInfo(message), message);
+        isResolved = await this.emit(`message/${message.chatType}`, this.getSenderInfo(message), message);
         if (isResolved) return true;
 
         isResolved = await this.emit('message', this.getSenderInfo(message), message);
@@ -264,12 +264,12 @@ export class EventManager {
 
     public async emitCommand(contentText: string, message: CommonReceivedMessage) {
         let command = '';
-        let args = '';
+        let param = '';
 
         // 尝试识别空格分隔的指令
         if (contentText.includes(' ')) {
             command = contentText.split(' ')[0].toLocaleLowerCase();
-            args = contentText.substring(command.length + 1);
+            param = contentText.substring(command.length + 1);
 
             if (!(command in this.commandList)) {
                 command = '';
@@ -290,14 +290,19 @@ export class EventManager {
                 return false;
             }
 
-            args = contentText.substring(command.length);
+            param = contentText.substring(command.length);
         }
 
         if (this.app.debug) {
-            this.app.logger.debug('指令识别结果', command, args);
+            this.app.logger.debug('指令识别结果', command, param);
         }
 
-        return await this.emit(`command/${command}`, this.getSenderInfo(message), args, message);
+        let commandArgs: CommandInputArgs = {
+            command,
+            param
+        };
+
+        return await this.emit(`command/${command}`, this.getSenderInfo(message), commandArgs, message);
     }
 
     public async emitRawEvent(robot: Robot, event: string, ...args: any[]) {
@@ -320,18 +325,18 @@ export class EventManager {
     }
 
     public getSenderInfo(message: CommonReceivedMessage): ChatIdentity {
-        if (message.origin === 'private') {
+        if (message.chatType === 'private') {
             return {
                 type: 'private',
                 robot: message.receiver,
-                userId: message.sender.uid
+                userId: message.sender.userId
             };
-        } else if (message.origin === 'group') {
+        } else if (message.chatType === 'group') {
             return {
                 type: 'group',
                 robot: message.receiver,
                 groupId: message.sender.groupId,
-                userId: message.sender.uid
+                userId: message.sender.userId
             };
         }
 
