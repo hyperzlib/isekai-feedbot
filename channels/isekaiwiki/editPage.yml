@@ -8,4 +8,3 @@ tpl:
   default: |-
     {{{author}}} 更新了页面《{{{title}}}》:
     {{{summary}}}
-    {{{url}}}

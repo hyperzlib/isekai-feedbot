@@ -1,19 +1,19 @@
 import TelegramBot from "node-telegram-bot-api";
-import App from "../App";
-import { RobotConfig } from "../Config";
-import { CommonSendMessage } from "../message/Message";
-import { ChatIdentity } from "../message/Sender";
-import { CommandInfo } from "../PluginManager";
-import { Robot } from "../RobotManager";
-import { Target } from "../SubscribeManager";
-import { Utils } from "../utils/Utils";
+import App from "../../App";
+import { RobotConfig } from "../../Config";
+import { CommonSendMessage } from "../../message/Message";
+import { ChatIdentity } from "../../message/Sender";
+import { CommandInfo } from "../../PluginManager";
+import { Target } from "../../SubscribeManager";
+import { Utils } from "../../utils/Utils";
+import { RobotAdapter } from "../Robot";
 
 export type TelegramRobotConfig = RobotConfig & {
     token: string;
     proxy?: string;
 }
 
-export default class TelegramRobot implements Robot {
+export default class TelegramRobot implements RobotAdapter {
     private app: App;
 
     public type = 'telegram';
@@ -75,11 +75,6 @@ export default class TelegramRobot implements Robot {
         }
         await this.bot.setMyCommands(botCommands);
         */
-    }
-
-    getSession(chatIdentity: ChatIdentity, type: string) {
-        const sessionPath = this.app.robot.getSessionPath(chatIdentity, type);
-        return this.app.cache.getStore(sessionPath);
     }
 
     /**

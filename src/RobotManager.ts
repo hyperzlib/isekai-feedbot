@@ -4,39 +4,9 @@ import path from "path";
 import App from "./App";
 import { MultipleMessage } from "./base/provider/BaseProvider";
 import { RobotConfig } from "./Config";
-import { CommonGroupMessage, CommonMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage, MessageChunk } from "./message/Message";
-import { GroupSender, ChatIdentity, UserSender, UserInfoType, GroupInfoType, RootGroupInfoType, ChannelInfoType, GroupUserInfoType } from "./message/Sender";
-import { CommandInfo } from "./PluginManager";
-import { RestfulApiManager, RestfulContext, RestfulRouter } from "./RestfulApiManager";
-import { CacheStore } from "./CacheManager";
-import { Target } from "./SubscribeManager";
-import { MessageSchemaType } from "./odm/Message";
-
-export interface Robot {
-    type: string;
-    robotId?: string;
-    userId?: string;
-    description?: string;
-    initialize?: () => Promise<any>;
-    destroy?: () => Promise<any>;
-    initRestfulApi?: (router: RestfulRouter, api: RestfulApiManager) => Promise<any>;
-    setCommands?(commands: CommandInfo[]): Promise<any>;
-    markRead?(message: CommonReceivedMessage): Promise<boolean>;
-    sendTyping?(chatIdentity: ChatIdentity): Promise<boolean>;
-    sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
-    sendPushMessage(targets: Target[], message: string): Promise<any>;
-    deleteMessage?(chatIdentity: ChatIdentity, messageId: string): Promise<boolean>;
-    getSession(chatIdentity: ChatIdentity, type: string): CacheStore;
-    ensureMediaUrl?(mediaMessageChunk: MessageChunk): Promise<void>;
-    
-    getUsersInfo?(userIds: string[]): Promise<(UserInfoType | null)[]>;
-    getGroupInfo?(groupId: string, rootGroupId?: string): Promise<GroupInfoType | null>;
-    getRootGroupInfo?(rootGroupId: string): Promise<RootGroupInfoType | null>;
-    getChannelInfo?(channelId: string): Promise<ChannelInfoType | null>;
-    getGroupUsersInfo?(userIds: string[], groupId: string, rootGroupId?: string): Promise<(GroupUserInfoType | null)[]>;
-
-    parseDBMessage?(dbMessage: MessageSchemaType): Promise<CommonMessage>;
-}
+import { CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage } from "./message/Message";
+import { GroupSender, ChatIdentity, UserSender } from "./message/Sender";
+import { Robot, RobotAdapter } from "./robot/Robot";
 
 export class RobotManager {
     private app: App;
@@ -54,7 +24,7 @@ export class RobotManager {
     }
 
     public async initialize() {
-        const ROBOT_PATH = path.join(this.app.srcPath, "robot");
+        const ROBOT_PATH = path.join(this.app.srcPath, "robot/adapter");
 
         for (let file of fs.readdirSync(ROBOT_PATH)) {
             let robotFile = `${ROBOT_PATH}/${file}`;
@@ -84,12 +54,12 @@ export class RobotManager {
             if (robotType in this.robotClasses) {
                 let robotClass = this.robotClasses[robotType];
                 try {
-                    let robotObject: Robot = new robotClass(this.app, robotId, robotConfig);
+                    let robotAdapter: RobotAdapter = new robotClass(this.app, robotId, robotConfig);
+                    let robotWrapper: Robot = new Robot(this.app, robotId, robotAdapter);
 
-                    this.robots[robotId] = robotObject;
-
-                    await robotObject.initialize?.();
-                    await robotObject.initRestfulApi?.(this.app.restfulApi.getRobotRouter(robotId), this.app.restfulApi);
+                    this.robots[robotId] = robotWrapper;
+                    
+                    await robotWrapper.initialize();
 
                     this.app.logger.info(`已加载Robot: ${robotId}`);
                 } catch(err) {

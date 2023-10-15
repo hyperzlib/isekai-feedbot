@@ -1,5 +1,6 @@
+import { Robot } from "#ibot/robot/Robot";
+import { LiteralUnion } from "#ibot/utils/types";
 import { any } from "micromatch";
-import { Robot } from "../RobotManager";
 
 export type BaseSenderType = "user" | "group" | "channel";
 
@@ -92,11 +93,11 @@ export class GroupSender {
     }
 
     get groupDisplayName() {
-        return this.groupName ?? this.groupId;
+        return this.groupName || this.groupId;
     }
 
     get displayName() {
-        return this.nickName ?? this.globalNickName ?? this.userName ?? this.userId;
+        return this.nickName || this.globalNickName || this.userName || this.userId;
     }
 
     get userSender() {
@@ -109,7 +110,7 @@ export class GroupSender {
 }
 
 export interface ChatIdentity {
-    type: ('private' | 'group' | 'channel' | 'raw') | (string & {});
+    type: LiteralUnion<'private' | 'group' | 'channel' | 'raw'>;
     robot: Robot;
     rootGroupId?: string;
     groupId?: string;

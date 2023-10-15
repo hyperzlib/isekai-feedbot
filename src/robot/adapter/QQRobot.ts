@@ -1,17 +1,16 @@
 import koa from "koa";
 import got from "got/dist/source";
-import fs from "fs";
 
-import App from "../App";
-import { Robot } from "../RobotManager";
-import { Target } from "../SubscribeManager";
-import { Utils } from "../utils/Utils";
-import { FullRestfulContext, RestfulApiManager, RestfulRouter } from "../RestfulApiManager";
+import App from "../../App";
+import { Robot, RobotAdapter } from "../Robot";
+import { Target } from "../../SubscribeManager";
+import { Utils } from "../../utils/Utils";
+import { FullRestfulContext, RestfulApiManager, RestfulRouter } from "../../RestfulApiManager";
 import { convertMessageToQQChunk, parseQQMessageChunk, QQAttachmentMessage, QQGroupMessage, QQGroupSender, QQPrivateMessage, QQUserSender } from "./qq/Message";
-import { CommonReceivedMessage, CommonSendMessage, MessageChunk } from "../message/Message";
-import { PluginController } from "../PluginManager";
-import { RobotConfig } from "../Config";
-import { ChatIdentity, GroupInfoType, UserInfoType } from "../message/Sender";
+import { CommonReceivedMessage, CommonSendMessage, MessageChunk } from "../../message/Message";
+import { PluginController } from "../../PluginManager";
+import { RobotConfig } from "../../Config";
+import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
 
 export type QQRobotConfig = RobotConfig & {
@@ -27,18 +26,19 @@ export type QQGroupInfo = {
     memberLimit?: number
 };
 
-export default class QQRobot implements Robot {
+export default class QQRobot implements RobotAdapter {
     public type = 'qq';
 
     public userId: string;
     public robotId: string;
     public description: string;
 
-    public commandPrefix: string[] = ['/', '！', '!', '／'];
-
     public infoProvider: QQInfoProvider;
 
+    private config: QQRobotConfig;
+
     private app: App;
+    private wrapper!: Robot<QQRobot>;
     private endpoint: string;
 
     private taskId?: NodeJS.Timer;
@@ -49,24 +49,30 @@ export default class QQRobot implements Robot {
     constructor(app: App, robotId: string, config: QQRobotConfig) {
         this.app = app;
         this.robotId = robotId;
+        this.config = config;
         this.endpoint = 'http://' + config.host;
         this.userId = config.userId.toString();
 
         this.description = config.description ?? this.app.config.robot_description ?? 'Isekai Feedbot for QQ';
 
-        if (config.command_prefix) {
-            if (Array.isArray(config.command_prefix)) {
-                this.commandPrefix = config.command_prefix;
-            } else if (typeof config.command_prefix === 'string') {
-                this.commandPrefix = [config.command_prefix];
-            }
-        }
-
         this.messageTypeHandler.help = this.parseHelpMessage.bind(this);
         this.infoProvider = new QQInfoProvider(app, this, config);
     }
 
-    async initialize() {
+    async initialize(wrapper: Robot) {
+        this.wrapper = wrapper;
+
+        if (this.config.command_prefix) {
+            if (Array.isArray(this.config.command_prefix)) {
+                this.wrapper.commandPrefix = this.config.command_prefix;
+            } else if (typeof this.config.command_prefix === 'string') {
+                this.wrapper.commandPrefix = [this.config.command_prefix];
+            }
+        }
+
+        this.wrapper.account = this.userId;
+
+        await this.initRestfulApi(this.wrapper.restfulRouter);
         await this.infoProvider.initialize();
     }
 
@@ -74,7 +80,7 @@ export default class QQRobot implements Robot {
         await this.infoProvider.destroy();
     }
 
-    async initRestfulApi(router: RestfulRouter, api: RestfulApiManager) {
+    async initRestfulApi(router: RestfulRouter) {
         router.post(`/event`, this.handlePostEvent.bind(this));
     }
 
@@ -116,10 +122,10 @@ export default class QQRobot implements Robot {
         }
 
         helpBuilder.push(
-            '可用的指令前缀："' + this.commandPrefix.join('"、"') + '"',
+            '可用的指令前缀："' + this.wrapper.commandPrefix.join('"、"') + '"',
             '功能列表：'
         );
-        const mainCommandPrefix = this.commandPrefix[0];
+        const mainCommandPrefix = this.wrapper.commandPrefix[0];
 
         for (let controller of controllers) {
             helpBuilder.push(`【${controller.name}】`);
@@ -151,7 +157,7 @@ export default class QQRobot implements Robot {
     async handleMessage(postData: any) {
         let isResolved = false;
         if (postData.type) {
-            isResolved = await this.app.event.emitRawEvent(this, postData.type, postData);
+            isResolved = await this.app.event.emitRawEvent(this.wrapper, postData.type, postData);
             if (isResolved) return;
         }
 
@@ -161,7 +167,7 @@ export default class QQRobot implements Robot {
                 // 处理群消息
                 let groupInfo = this.infoProvider.groupList.find((info) => info.groupId === postData.group_id);
 
-                let groupSender = new QQGroupSender(this, postData.group_id.toString(), postData.user_id.toString());
+                let groupSender = new QQGroupSender(this.wrapper, postData.group_id.toString(), postData.user_id.toString());
                 groupSender.groupInfo = groupInfo;
                 groupSender.groupName = groupInfo?.groupName;
                 groupSender.globalNickName = postData.sender?.nickname;
@@ -170,7 +176,7 @@ export default class QQRobot implements Robot {
                 groupSender.level = postData.sender?.level;
                 groupSender.title = postData.sender?.title;
 
-                message = new QQGroupMessage(groupSender, this, postData.message_id.toString());
+                message = new QQGroupMessage(groupSender, this.wrapper, postData.message_id.toString());
                 message.time = new Date(postData.time * 1000);
 
                 message = await parseQQMessageChunk(this, postData.message ?? [], message);
@@ -179,10 +185,10 @@ export default class QQRobot implements Robot {
                 await this.infoProvider.updateUserSender(groupSender.userSender);
             } else if (postData.message_type === 'private') {
                 // 处理私聊消息
-                let userSender = new QQUserSender(this, postData.user_id.toString());
+                let userSender = new QQUserSender(this.wrapper, postData.user_id.toString());
                 userSender.nickName = postData.sender?.nickname;
 
-                message = new QQPrivateMessage(userSender, this, postData.message_id.toString());
+                message = new QQPrivateMessage(userSender, this.wrapper, postData.message_id.toString());
                 message.time = new Date(postData.time * 1000);
 
                 message = await parseQQMessageChunk(this, postData.message ?? [], message);
@@ -192,21 +198,21 @@ export default class QQRobot implements Robot {
 
             if (message) {
                 // 保存消息
-                this.infoProvider.saveMessage(message);
+                let messageRef = this.infoProvider.saveMessage(message);
 
                 // 处理原始消息
-                isResolved = await this.app.event.emitRawMessage(message);
+                isResolved = await this.app.event.emitRawMessage(messageRef);
                 if (isResolved) return;
 
                 // 处理指令
-                let commandText = this.getCommandContentText(message);
+                let commandText = this.getCommandContentText(messageRef);
                 if (commandText) {
-                    await this.app.event.emitCommand(commandText, message);
+                    await this.app.event.emitCommand(commandText, messageRef);
                     return;
                 }
 
                 // 处理消息
-                isResolved = await this.app.event.emitMessage(message);
+                isResolved = await this.app.event.emitMessage(messageRef);
                 if (isResolved) return;
             }
         }
@@ -221,11 +227,11 @@ export default class QQRobot implements Robot {
         // 处理群消息
         let groupInfo = this.infoProvider.groupList.find((info) => info.groupId === postData.group_id);
 
-        let groupSender = new QQGroupSender(this, postData.group_id.toString(), postData.user_id.toString());
+        let groupSender = new QQGroupSender(this.wrapper, postData.group_id.toString(), postData.user_id.toString());
         groupSender.groupInfo = groupInfo;
         groupSender.groupName = groupInfo?.groupName;
 
-        let message = new QQGroupMessage(groupSender, this);
+        let message = new QQGroupMessage(groupSender, this.wrapper);
         message.time = new Date(postData.time * 1000);
 
         message.type = 'attachment';
@@ -242,18 +248,20 @@ export default class QQRobot implements Robot {
             }
         } as QQAttachmentMessage);
 
+        let messageRef = await this.infoProvider.saveMessage(message);
+
         let isResolved = false;
         // 处理原始消息
-        isResolved = await this.app.event.emitRawMessage(message);
+        isResolved = await this.app.event.emitRawMessage(messageRef);
         if (isResolved) return;
 
         // 处理消息
-        isResolved = await this.app.event.emitMessage(message);
+        isResolved = await this.app.event.emitMessage(messageRef);
         if (isResolved) return;
     }
 
     getCommandContentText(message: CommonReceivedMessage) {
-        for (let prefix of this.commandPrefix) {
+        for (let prefix of this.wrapper.commandPrefix) {
             if (message.contentText.startsWith(prefix)) {
                 // 移除指令前缀
                 if (message.content[0].data?.text) {
@@ -265,12 +273,7 @@ export default class QQRobot implements Robot {
         return null;
     }
 
-    getSession(chatIdentity: ChatIdentity, type: string) {
-        const sessionPath = this.app.robot.getSessionPath(chatIdentity, type);
-        return this.app.cache.getStore(sessionPath);
-    }
-
-    async ensureMediaUrl(mediaMessageChunk: MessageChunk): Promise<void> {
+    async retrieveMediaUrl(mediaMessageChunk: MessageChunk): Promise<void> {
         if (!mediaMessageChunk.data.url) {
             if (mediaMessageChunk.type.includes('qqattachment')) {
                 let data = mediaMessageChunk.data;
@@ -298,21 +301,33 @@ export default class QQRobot implements Robot {
      *  获取合并转发的原消息列表
      */
     async getReferencedMessages(resId: string): Promise<CommonReceivedMessage[] | null> {
-        const res = await this.callRobotApi('/get_forward_msg', {
+        const res = await this.callRobotApi('get_forward_msg', {
             message_id: resId,
         });
-        if (!Array.isArray(res?.messages)) {
+        if (!Array.isArray(res?.data?.messages)) {
             return null;
         }
 
         let messageList: CommonReceivedMessage[] = [];
-        for (let messageData of res.messages) {
+        for (let messageData of res.data.messages) {
             if (messageData) {
-                let userSender = new QQUserSender(this, messageData.sender?.user_id.toString());
+                messageData.content ??= [];
+
+                let userSender = new QQUserSender(this.wrapper, messageData.sender?.user_id.toString());
                 userSender.nickName = messageData.sender?.nickname;
 
-                let message = new QQPrivateMessage(userSender, this);
+                let message = new QQPrivateMessage(userSender, this.wrapper);
+                
+                // 生成消息ID
+                message.id = `ref:${userSender.userId}:${messageData.time}`;
                 message.time = new Date(messageData.time * 1000);
+
+                // 修改回复消息的指向
+                messageData.content.forEach((chunk: any) => {
+                    if (chunk?.type === 'reply' && chunk.data?.qq && chunk.data?.time) {
+                        chunk.data.id = `ref:${chunk.data.qq}:${chunk.data.time}`;
+                    }
+                })
 
                 message = await parseQQMessageChunk(this, messageData.content ?? [], message);
 

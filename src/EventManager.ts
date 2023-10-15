@@ -1,10 +1,11 @@
 import App from "./App";
 import { CommandOverrideConfig } from "./Config";
 import { PermissionDeniedError, RateLimitError } from "./error/errors";
-import { CommonReceivedMessage, CommonSendMessage } from "./message/Message";
+import { CommonReceivedMessage } from "./message/Message";
 import { ChatIdentity } from "./message/Sender";
 import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
-import { Robot } from "./RobotManager";
+import { Robot } from "./robot/Robot";
+import { Reactive } from "./utils/reactive";
 
 export type ControllerEventInfo = {
     priority: number;
@@ -143,7 +144,7 @@ export class EventManager {
 
     public async emit(eventName: string, senderInfo?: ChatIdentity | null, ...args: any[]) {
         if (this.app.debug) {
-            if (args[0] instanceof CommonReceivedMessage) {
+            if (typeof args[0] === 'object' && args[0].chatType) {
                 this.app.logger.debug(`触发事件 ${eventName} ${args[0].contentText}`);
             } else {
                 this.app.logger.debug(`触发事件 ${eventName}`);
@@ -166,8 +167,8 @@ export class EventManager {
             console.error(error);
 
             for (let arg of args) {
-                if (arg instanceof CommonReceivedMessage) {
-                    const msg = arg;
+                if (typeof arg === 'object' && arg.chatType) {
+                    const msg: CommonReceivedMessage = arg;
                     if (error instanceof RateLimitError) {
                         const retryAfterMinutes = Math.ceil(error.retryAfter / 60);
                         msg.sendReply(`使用太多了，${retryAfterMinutes}分钟后再试吧`);
@@ -240,7 +241,7 @@ export class EventManager {
         return isResolved;
     }
 
-    public async emitMessage(message: CommonReceivedMessage) {
+    public async emitMessage(message: Reactive<CommonReceivedMessage>) {
         let isResolved = false;
 
         if (message.chatType === 'private' || (message.chatType === 'group' && message.mentionedReceiver)) {
@@ -262,7 +263,7 @@ export class EventManager {
         return false;
     }
 
-    public async emitCommand(contentText: string, message: CommonReceivedMessage) {
+    public async emitCommand(contentText: string, message: Reactive<CommonReceivedMessage>) {
         let command = '';
         let param = '';
 
@@ -309,7 +310,7 @@ export class EventManager {
         return await this.emit(`raw/${robot.type}/${event}`, { type: 'raw', robot: robot }, event);
     }
 
-    public async emitRawMessage(message: CommonReceivedMessage) {
+    public async emitRawMessage(message: Reactive<CommonReceivedMessage>) {
         let isResolved = false;
 
         await this.emit(`filter/message`, null, message);
@@ -320,7 +321,7 @@ export class EventManager {
         return await this.emit('raw/message', this.getSenderInfo(message), message);
     }
 
-    public async emitFilterSendMessage(message: CommonSendMessage) {
+    public async emitFilterSendMessage(message: Reactive<CommonReceivedMessage>) {
         
     }
 

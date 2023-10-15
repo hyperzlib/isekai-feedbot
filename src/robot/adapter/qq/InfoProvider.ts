@@ -1,10 +1,11 @@
-import App from "../../App";
-import { compareProps } from "../../utils/func";
-import QQRobot, { QQRobotConfig } from "../QQRobot";
+import App from "../../../App";
+import { compareProps } from "../../../utils/func";
 import { QQGroupSender, QQUserSender } from "./Message";
-import { GroupInfoType, GroupUserInfoType, UserInfoType } from "../../message/Sender";
-import { CommonMessage } from "../../message/Message";
-import { RobotStorage } from "../../storage/RobotStorage";
+import { GroupInfoType, GroupUserInfoType, UserInfoType } from "../../../message/Sender";
+import { CommonMessage } from "../../../message/Message";
+import { RobotStorage } from "../../../storage/RobotStorage";
+import { Reactive, reactive } from "../../../utils/reactive";
+import QQRobot, { QQRobotConfig } from "../QQRobot";
 
 export type QQGroupInfo = {
     groupId: string,
@@ -79,11 +80,17 @@ export class QQInfoProvider {
         });
     }
 
-    public saveMessage(message: CommonMessage) {
-        this.storages?.message.set(message).catch((err: any) => {
-            this.app.logger.error(`将消息保存到数据库出错: ${err.message}`);
-            console.error(err);
-        })
+    public saveMessage<T extends CommonMessage>(message: T): Reactive<T> {
+        if (this.storages) {
+            this.storages.message.set(message).catch((err: any) => {
+                this.app.logger.error(`将消息保存到数据库出错: ${err.message}`);
+                console.error(err);
+            });
+
+            return this.storages.message.reactive(message);
+        } else {
+            return reactive(message);
+        }
     }
 
     async getGroupList(): Promise<any[]> {
@@ -152,7 +159,7 @@ export class QQInfoProvider {
      * @param userId 
      * @returns 
      */
-    private getUserImage(userId: string) {
+    public getUserImage(userId: string) {
         return `https://q1.qlogo.cn/g?b=qq&nk=${userId}&s=640`;
     }
 
@@ -161,7 +168,7 @@ export class QQInfoProvider {
      * @param groupId 
      * @returns 
      */
-    private getGroupImage(groupId: string) {
+    public getGroupImage(groupId: string) {
         return `https://p.qlogo.cn/gh/${groupId}/${groupId}/100`
     }
 

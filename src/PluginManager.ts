@@ -1,6 +1,5 @@
 import { EventManager } from "./EventManager";
 import { CommonReceivedMessage } from "./message/Message";
-import { Robot } from "./RobotManager";
 import fs from 'fs';
 import fsAsync from 'fs/promises';
 import chokidar from 'chokidar';
@@ -10,6 +9,8 @@ import EventEmitter from "events";
 import path from "path";
 import { ChatIdentity } from "./message/Sender";
 import { Utils } from "./utils/Utils";
+import { Robot } from "./robot/Robot";
+import { Reactive } from "./utils/reactive";
 
 export const MessagePriority = {
     LOWEST: 0,
@@ -53,8 +54,8 @@ export type CommandInputArgs = {
     param: string,
 }
 
-export type MessageCallback = (message: CommonReceivedMessage, resolved: VoidFunction) => any;
-export type CommandCallback = (args: CommandInputArgs, message: CommonReceivedMessage, resolved: VoidFunction) => any;
+export type MessageCallback = (message: Reactive<CommonReceivedMessage>, resolved: VoidFunction) => any;
+export type CommandCallback = (args: CommandInputArgs, message: Reactive<CommonReceivedMessage>, resolved: VoidFunction) => any;
 export type RawEventCallback = (robot: Robot, event: any, resolved: VoidFunction) => any;
 
 export type AllowedList = string[] | '*';

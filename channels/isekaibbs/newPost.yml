@@ -6,6 +6,10 @@ source:
   type: newPost
 tpl:
   default: |-
-    {{{postUser.displayname}}}「{{{postUser.username}}}」发布了帖子《{{{topic.titleRaw}}}》:
-    {{{excerpt post.content 100}}}
-    {{{topic.url}}}
+     {{{postUser.displayname}}}「{{{postUser.username}}}」发布了帖子《{{{topic.titleRaw}}}》:
+     {{{excerpt post.content 100}}}
+
+  # default: |-
+  #   {{{postUser.displayname}}}「{{{postUser.username}}}」发布了帖子《{{{topic.titleRaw}}}》:
+  #   {{{excerpt post.content 100}}}
+  #   {{{topic.url}}}

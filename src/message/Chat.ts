@@ -1,5 +1,5 @@
+import { Robot } from "#ibot/robot/Robot";
 import App from "../App";
-import { Robot } from "../RobotManager";
 
 export class ChatThread {
     private app: App;

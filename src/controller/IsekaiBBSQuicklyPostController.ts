@@ -1,20 +1,40 @@
-import { AuthType, createClient } from "webdav";
 import App from "../App";
-import { extname } from "path";
-import { AttachmentMessage } from "../message/Message";
 import { CommonReceivedMessage } from "../message/Message";
 import { MessagePriority, PluginController, PluginEvent } from "../PluginManager";
 import got from "got/dist/source";
 import { RandomMessage } from "../utils/RandomMessage";
-import { QQForwardingMessage } from "../robot/qq/Message";
-import QQRobot from "../robot/QQRobot";
-import { ChatIdentity, UserSender } from "../message/Sender";
-import { Utils } from "../utils/Utils";
-import { MessageUtils } from "../utils/message";
+import { QQForwardingMessage } from "../robot/adapter/qq/Message";
+import QQRobot from "../robot/adapter/QQRobot";
+import { GroupSender } from "../message/Sender";
+import { Robot } from "#ibot/robot/Robot";
 
 export type IsekaiBBSQuicklyPostConfig = {
     api_endpoint: string,
     token: string,
+};
+
+export type IsekaiQuicklyPostMessageData = {
+    /** 发布账号 */
+    account: string,
+    /** 发布账号的昵称（QQ昵称、邮箱姓名） */
+    nickname?: string,
+    /** 头像 */
+    avatar?: string,
+    /** 文章内容（Markdown） */
+    content: string,
+    /** 消息ID，用于建立回复树 */
+    id?: string,
+    /** 回复的消息ID */
+    replyId?: string,
+}
+
+export type IsekaiQuicklyPostBody = {
+    /** 发布来源 */
+    srcType: string,
+    /** 文章标题 */
+    title?: string,
+    /** 消息列表 */
+    messages: IsekaiQuicklyPostMessageData[],
 };
 
 export default class IsekaiBBSQuicklyPost implements PluginController {
@@ -101,48 +121,87 @@ export default class IsekaiBBSQuicklyPost implements PluginController {
         let markdownBuilder: string[] = [];
         message.content.forEach(messageChunk => {
             if (messageChunk.type.includes('text')) {
-                markdownBuilder.push(messageChunk.data?.text ?? '');
+                markdownBuilder.push(messageChunk.text ?? '');
             } else if (messageChunk.type.includes('image')) {
                 markdownBuilder.push(`![${messageChunk.data?.alt ?? ''}](${messageChunk.data?.url ?? ''})`);
+            } else if (messageChunk.type.includes('emoji')) {
+                markdownBuilder.push(messageChunk.text ?? '🫥');
+            } else if (messageChunk.type.includes('record')) {
+                markdownBuilder.push('[语音消息]');
             } else if (messageChunk.type.includes('mention')) {
                 if (messageChunk.data?.text) {
-                    markdownBuilder.push(`&#64;${messageChunk.data.text}`);
+                    markdownBuilder.push(`**&#64;${messageChunk.data.text}**`);
                 }
             }
         });
+        return markdownBuilder.join('');
     }
 
-    async postNewThread(message: CommonReceivedMessage, groupConfig: IsekaiBBSQuicklyPostConfig) {
-        if (message.receiver.type !== 'qq') {
+    async postNewThread(refMessage: CommonReceivedMessage, groupConfig: IsekaiBBSQuicklyPostConfig) {
+        if (refMessage.receiver.type !== 'qq') {
             // TODO: support other platform
             return;
         }
-        let attachmentMsg = message.content[0] as QQForwardingMessage;
+        let attachmentMsg = refMessage.content[0] as QQForwardingMessage;
         let resId = attachmentMsg.data.res_id;
-        let robot = message.receiver as QQRobot;
+        let robot = refMessage.receiver as Robot<QQRobot>;
+        let referenceSender = refMessage.sender as GroupSender;
 
-        message.markRead()
+        refMessage.markRead()
 
-        this.app.logger.info(`[群号：${message.sender.groupId}] 收到合并转发消息，正在发送到BBS。`);
+        this.app.logger.info(`[群号：${refMessage.sender.groupId}] 收到合并转发消息 ${resId}，正在发送到BBS。`);
 
-        let messageList = await robot.getReferencedMessages(resId);
+        let messageList = await robot.adapter.getReferencedMessages(resId);
 
         if (!messageList || messageList.length === 0) {
-            this.app.logger.info(`[群号：${message.sender.groupId}] 合并转发消息内容为空或无法获取。`);
+            this.app.logger.info(`[群号：${refMessage.sender.groupId}] 合并转发消息内容为空或无法获取。`);
             return;
         }
         
         try {
-            let markdownBuilder = [];
+            let markdownBuilder: string[] = [];
             for (let message of messageList) {
-                
+                const sender = message.sender as GroupSender;
+                const content = await this.messageToMarkdown(message);
+
+                markdownBuilder.push('**' + (sender.displayName ?? sender.userName ?? sender.userId) + ':** ');
+                markdownBuilder.push(content);
+                markdownBuilder.push('\n');
             }
+
+            let postData = {
+                srcType: 'qq',
+                messages: [{
+                    account: referenceSender.userId,
+                    nickname: referenceSender.displayName,
+                    avatar: robot.adapter.infoProvider.getUserImage(referenceSender.userId),
+                    content: markdownBuilder.join('\n'),
+                }],
+            } as IsekaiQuicklyPostBody;
+
+            const res = await got.post(groupConfig.api_endpoint, {
+                json: postData,
+                headers: {
+                    authorization: `Bearer ${groupConfig.token}`,
+                }
+            }).json<any>();
+
+            if (res.error) {
+                throw new Error(res.message);
+            }
+
+            // 保存threadId到消息
+            refMessage.extra['isekai_bbs_quicklypost'] = {
+                threadId: res.tid,
+            };
         } catch(err: any) {
-            this.app.logger.error("转存群文件失败：" + err.message, err);
+            this.app.logger.error("转发消息到BBS失败：" + err.message, err);
             console.error(err);
 
-            let msg = this.messageGroup.error.nextMessage(err.message);
-            await message.sendReply(msg ?? `转存群文件失败：${err.message}`, false);
+            let msg = this.messageGroup.error.nextMessage({
+                error: err.message,
+            });
+            await refMessage.sendReply(msg ?? `转发失败：${err.message}`, false);
         }
     }
 }

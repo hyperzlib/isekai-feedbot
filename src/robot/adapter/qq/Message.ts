@@ -1,5 +1,18 @@
-import { AttachmentMessage, CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage, CommonSendMessage, EmojiMessage, ImageMessage, MentionMessage, MessageChunk, TextMessage, RecordMessage } from "../../message/Message";
-import { GroupSender, UserSender } from "../../message/Sender";
+import { Robot } from "#ibot/robot/Robot";
+import {
+    AttachmentMessage,
+    CommonGroupMessage,
+    CommonPrivateMessage,
+    CommonReceivedMessage,
+    CommonSendMessage,
+    EmojiMessage,
+    ImageMessage,
+    MentionMessage,
+    MessageChunk,
+    TextMessage,
+    RecordMessage
+} from "../../../message/Message";
+import { GroupSender, UserSender } from "../../../message/Sender";
 import QQRobot, { QQGroupInfo } from "../QQRobot";
 import { qqFaceToEmoji } from "./emojiMap";
 
@@ -51,14 +64,14 @@ export interface QQAttachmentMessage extends AttachmentMessage {
 }
 
 export interface QQForwardingMessage extends MessageChunk {
-    type: ['qqforwarding'];
+    type: ['reference', 'qqforwarding'];
     data: {
         res_id: string;
     }
 }
 
 export class QQUserSender extends UserSender {
-    constructor(robot: QQRobot, userId: string) {
+    constructor(robot: Robot<QQRobot>, userId: string) {
         super(robot, userId);
         this.userName = userId;
     }
@@ -70,7 +83,7 @@ export class QQGroupSender extends GroupSender {
     public title?: string;
     public groupInfo?: QQGroupInfo;
 
-    constructor(robot: QQRobot, groupId: string, userId: string) {
+    constructor(robot: Robot<QQRobot>, groupId: string, userId: string) {
         super(robot, groupId, userId);
         this.userName = userId;
     }
@@ -176,13 +189,54 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                                     console.log('forwarding message', chunkData.data.data);
                                     if (jsonData.meta?.detail?.resid) {
                                         message.content.push({
-                                            type: ['qqforwarding'],
+                                            type: ['reference', 'qqforwarding'],
                                             text: '[合并转发消息]',
                                             data: {
                                                 res_id: jsonData.meta.detail.resid
                                             }
                                         } as QQForwardingMessage);
                                     }
+                                    break;
+                                case 'com.tencent.miniapp_01':
+                                    if (jsonData.meta?.detail_1?.qqdocurl) {
+                                        message.content.push({
+                                            type: ['text', 'qqurl'],
+                                            text: jsonData.meta.detail_1.qqdocurl,
+                                            data: {
+                                                url: jsonData.meta.detail_1.qqdocurl,
+                                                title: jsonData.meta.detail_1.desc,
+                                            }
+                                        } as QQUrlMessage);
+                                    } else if (jsonData.meta?.detail_1?.url) {
+                                        message.content.push({
+                                            type: ['text', 'qqurl'],
+                                            text: jsonData.meta.detail_1.url,
+                                            data: {
+                                                url: jsonData.meta.detail_1.url,
+                                                title: jsonData.meta.detail_1.desc,
+                                            }
+                                        } as QQUrlMessage);
+                                    }
+                                    break;
+                                case 'com.tencent.structmsg':
+                                    if (jsonData.meta) {
+                                        for (let item of Object.values<any>(jsonData.meta)) {
+                                            if (item?.jumpUrl || item?.url) {
+                                                message.content.push({
+                                                    type: ['text', 'qqurl'],
+                                                    text: item.jumpUrl ?? item.url,
+                                                    data: {
+                                                        url: item.jumpUrl ?? item.url,
+                                                        title: item.title ?? item.desc,
+                                                    }
+                                                } as QQUrlMessage);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    break;
+                                default:
+                                    console.log('unknown message', chunkData);
                             }
                         } catch (_) { }
                     }

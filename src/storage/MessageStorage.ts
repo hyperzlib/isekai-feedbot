@@ -4,6 +4,8 @@ import { ModelRegistry } from "../DatabaseManager";
 import { ItemLimitedList } from "../utils/ItemLimitedList";
 import { CommonMessage } from "../message/Message";
 import { RobotStorage } from "./RobotStorage";
+import { Reactive, reactive } from "../utils/reactive";
+import { debounce } from "throttle-debounce";
 
 export class MessageStorage {
     private app: App;
@@ -31,7 +33,7 @@ export class MessageStorage {
 
     public async get(messageId: string): Promise<CommonMessage | null> {
         // from cache
-        let messageObj = this.cache.find((msg) => msg && msg.id === messageId);
+        let messageObj: CommonMessage | null | undefined = this.cache.find((msg) => msg && msg.id === messageId);
         if (messageObj) {
             return messageObj;
         }
@@ -46,7 +48,7 @@ export class MessageStorage {
                 const robot = this.storages.robot;
                 if (robot) {
                     messageObj = await robot.parseDBMessage?.(doc);
-                    return messageObj!;
+                    return messageObj;
                 } else {
                     this.app.logger.error(`无法找到机器人配置：${this.storages.robotId}`);
                 }
@@ -76,6 +78,29 @@ export class MessageStorage {
         }
 
         this.cache.push(message);
+    }
+
+    /**
+     * 将消息转换为Reactive对象（自动更新数据库）
+     * @param message 
+     */
+    public reactive<T extends CommonMessage>(message: T): Reactive<T> {
+        const messageRef = reactive(message);
+
+        // debounce
+        const onDataChanged = debounce(this.cacheTTL * 1000, async () => {
+            this.app.logger.debug(`Reactive 更新消息: ${message.id}`);
+            this.set(message).catch((err) => {
+                this.app.logger.error(`更新消息 ${message.id} 失败：${err.message}`, err);
+                console.error(err);
+            });
+        });
+
+        messageRef._on('change', (key: string, val: Reactive<T>) => {
+            onDataChanged();
+        });
+
+        return messageRef;
     }
 
     public async remove(messageId: string): Promise<void> {

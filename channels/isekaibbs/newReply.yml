@@ -8,4 +8,5 @@ tpl:
   default: |-
     {{{postUser.displayname}}}「{{{postUser.username}}}」回复了 {{{topicUser.displayname}}}「{{{topicUser.username}}}」的帖子《{{topic.titleRaw}}》:
     {{{excerpt post.content 100}}}
-    {{{post.url}}}
+      
+  # {{{post.url}}}

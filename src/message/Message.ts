@@ -1,9 +1,10 @@
-import { Robot } from "../RobotManager";
 import { CacheStore } from "../CacheManager";
-import { MessageDataType, MessageSchemaType, chatIdentityToDB } from "../odm/Message";
+import { MessageDataType, chatIdentityToDB } from "../odm/Message";
 import { BaseSender, ChatIdentity, GroupSender, IMessageSender, UserSender } from "./Sender";
 import { LiteralUnion } from "../utils/types";
 import { Utils } from "../utils/Utils";
+import { Robot } from "#ibot/robot/Robot";
+import { Reactive, reactive } from "#ibot/utils/reactive";
 
 export enum MessageDirection {
     RECEIVE = 1,
@@ -85,7 +86,7 @@ export class CommonMessage {
     deleted: boolean = false;
 
     /** 附加信息 */
-    extra: any = {};
+    extra: any = reactive({});
 
     private _contentText?: string;
 
@@ -234,7 +235,7 @@ export class CommonSendMessage extends CommonMessage {
     receiver: ChatIdentity;
 
     /** 回复的消息 */
-    repliedMessage?: CommonReceivedMessage;
+    repliedMessage?: Reactive<CommonReceivedMessage>;
 
     /** 发送时间 */
     time: Date = new Date();
@@ -290,6 +291,10 @@ export class CommonReceivedMessage extends CommonMessage {
     /** Session存储 */
     session: SessionStoreGroup = new Proxy({} as any, {
         get: (target, p) => {
+            if (p.toString().startsWith('_')) {
+                return undefined;
+            }
+            
             if (!target[p]) {
                 target[p] = this.getSession(p as string);
             }
@@ -321,7 +326,6 @@ export class CommonReceivedMessage extends CommonMessage {
 
         if (addReply) {
             newMessage.repliedId = this.id;
-            newMessage.repliedMessage = this;
         }
 
         return newMessage;
@@ -348,10 +352,10 @@ export class CommonReceivedMessage extends CommonMessage {
         let newMessage = this.createReplyMessage(message, shouldReply);
         if (newMessage.content.length === 0) return null;
 
-        newMessage.extra = {
+        newMessage.extra = reactive({
             ...newMessage.extra,
             ...extra,
-        };
+        });
 
         newMessage = await this.receiver.sendMessage(newMessage);
 
