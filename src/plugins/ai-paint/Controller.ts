@@ -1,6 +1,6 @@
-import App from "../App";
-import { CommonReceivedMessage, ImageMessage } from "../message/Message";
-import { MessagePriority, PluginController, PluginEvent } from "../PluginManager";
+import App from "#ibot/App";
+import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
+import { MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
 
 export type QueueData = {

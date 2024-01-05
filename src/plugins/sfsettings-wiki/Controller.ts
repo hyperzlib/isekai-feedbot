@@ -1,5 +1,5 @@
-import App from "../App";
-import { PluginController, PluginEvent } from "../PluginManager";
+import App from "#ibot/App";
+import { PluginController, PluginEvent } from "#ibot/PluginManager";
 import { WikiMisc } from "./wiki/WikiMisc";
 
 export default class SfsettingsController implements PluginController {

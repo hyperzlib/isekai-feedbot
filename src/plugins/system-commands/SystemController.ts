@@ -1,6 +1,6 @@
-import App from "../App";
-import { CommonReceivedMessage, CommonSendMessage } from "../message/Message";
-import { PluginController, PluginEvent } from "../PluginManager";
+import App from "#ibot/App";
+import { CommonReceivedMessage, CommonSendMessage } from "#ibot/message/Message";
+import { PluginController, PluginEvent } from "#ibot/PluginManager";
 
 export default class SystemController implements PluginController {
     public event!: PluginEvent;

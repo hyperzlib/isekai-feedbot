@@ -1,11 +1,11 @@
 import { AuthType, createClient } from "webdav";
-import App from "../App";
+import App from "#ibot/App";
 import { extname } from "path";
-import { AttachmentMessage } from "../message/Message";
-import { CommonReceivedMessage } from "../message/Message";
-import { MessagePriority, PluginController, PluginEvent } from "../PluginManager";
+import { AttachmentMessage } from "#ibot/message/Message";
+import { CommonReceivedMessage } from "#ibot/message/Message";
+import { MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
-import { RandomMessage } from "../utils/RandomMessage";
+import { RandomMessage } from "#ibot/utils/RandomMessage";
 
 export type WebdavConfig = {
     url: string,

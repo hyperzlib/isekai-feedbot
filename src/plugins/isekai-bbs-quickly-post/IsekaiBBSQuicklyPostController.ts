@@ -1,6 +1,6 @@
 import App from "#ibot/App";
 import { AddReplyMode, CommonReceivedMessage } from "#ibot/message/Message";
-import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "../PluginManager";
+import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
 import { RandomMessage } from "#ibot/utils/RandomMessage";
 import { QQForwardingMessage } from "#ibot/robot/adapter/qq/Message";

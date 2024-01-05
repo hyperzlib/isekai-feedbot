@@ -1,4 +1,4 @@
 import 'node-telegram-bot-api';
-import App from './dist/App';
+import App from './dist/server/App';
 
 new App("./config.yml");
