@@ -1,11 +1,11 @@
-import App from "../App";
-import { CommonReceivedMessage } from "../message/Message";
-import { MessagePriority, PluginController, PluginEvent } from "../PluginManager";
+import App from "#ibot/App";
+import { AddReplyMode, CommonReceivedMessage } from "#ibot/message/Message";
+import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "../PluginManager";
 import got from "got/dist/source";
-import { RandomMessage } from "../utils/RandomMessage";
-import { QQForwardingMessage } from "../robot/adapter/qq/Message";
-import QQRobot from "../robot/adapter/QQRobot";
-import { GroupSender } from "../message/Sender";
+import { RandomMessage } from "#ibot/utils/RandomMessage";
+import { QQForwardingMessage } from "#ibot/robot/adapter/qq/Message";
+import QQRobot from "#ibot/robot/adapter/QQRobot";
+import { GroupSender } from "#ibot/message/Sender";
 import { Robot } from "#ibot/robot/Robot";
 
 export type IsekaiBBSQuicklyPostConfig = {
@@ -79,6 +79,21 @@ export default class IsekaiBBSQuicklyPost implements PluginController {
 
         this.event.init(this);
 
+        this.event.registerCommand({
+            command: '绑定快速发布',
+            name: '绑定快速发布账号',
+        }, async (args, message, resolve) => {
+            let groupId = message.sender.groupId;
+            if (!groupId) return;
+
+            let groupConfig = this.config.groups[groupId];
+            if (!groupConfig) return;
+
+            resolve();
+
+            return this.bindAccount(args, message, groupConfig);
+        });
+
         this.event.on('message/group', async (message, resolved) => {
             if (message.type !== 'reference') return;
 
@@ -115,6 +130,41 @@ export default class IsekaiBBSQuicklyPost implements PluginController {
         const maskOffset = 2;
         if (username.length <= maskLen) return username;
         return username.substring(0, maskOffset) + '_'.repeat(maskLen) + username.substring(maskOffset + maskLen);
+    }
+
+    async bindAccount(args: CommandInputArgs, message: CommonReceivedMessage, groupConfig: IsekaiBBSQuicklyPostConfig) {
+        message.markRead();
+
+        let bindingCodeStr = args.param.trim();
+        if (!bindingCodeStr) {
+            await message.sendReply('请输入绑定码。', false);
+            return;
+        }
+
+        try {
+            const res = await got.post(groupConfig.api_endpoint + '/api/isekai-quicklypost/server-api/qq/verify-binding', {
+                json: {
+                    account: message.sender?.userId,
+                    binding_code: bindingCodeStr,
+                },
+                headers: {
+                    authorization: `Bearer ${groupConfig.token}`,
+                },
+            }).json<any>();
+
+            if (res.error) {
+                if (res.error === 'BINDING_CODE_INVALID') {
+                    await message.sendReply(`验证码错误或验证码已过期`, AddReplyMode.IGNORE_PRIVATE);
+                    return;
+                }
+                throw new Error(res.message);
+            }
+        } catch (err: any) {
+            this.app.logger.error("绑定BBS账号失败：" + err.message, err);
+            console.error(err);
+            
+            await message.sendReply(`绑定账号失败：${err.message}`, false);
+        }
     }
 
     async messageToMarkdown(message: CommonReceivedMessage) {
@@ -179,7 +229,7 @@ export default class IsekaiBBSQuicklyPost implements PluginController {
                 }],
             } as IsekaiQuicklyPostBody;
 
-            const res = await got.post(groupConfig.api_endpoint, {
+            const res = await got.post(groupConfig.api_endpoint + '/api/isekai-quicklypost/server-api/post', {
                 json: postData,
                 headers: {
                     authorization: `Bearer ${groupConfig.token}`,

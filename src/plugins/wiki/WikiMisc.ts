@@ -1,7 +1,7 @@
 import got from "got";
-import App from "../../App";
-import { CommonReceivedMessage } from "../../message/Message";
-import { PluginEvent } from "../../PluginManager";
+import App from "#ibot/App";
+import { CommonReceivedMessage } from "#ibot/message/Message";
+import { PluginEvent } from "#ibot/PluginManager";
 
 export class WikiMisc {
     public event!: PluginEvent;

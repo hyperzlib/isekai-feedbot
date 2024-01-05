@@ -2,7 +2,7 @@ import App from "../App";
 import { StorageConfig } from "../Config";
 import { ModelRegistry } from "../DatabaseManager";
 import { ItemLimitedList } from "../utils/ItemLimitedList";
-import { CommonMessage } from "../message/Message";
+import { CommonMessage, CommonSendMessage } from "../message/Message";
 import { RobotStorage } from "./RobotStorage";
 import { Reactive, reactive } from "../utils/reactive";
 import { debounce } from "throttle-debounce";
@@ -31,9 +31,9 @@ export class MessageStorage {
         this.models = this.storages.models;
     }
 
-    public async get(messageId: string): Promise<CommonMessage | null> {
+    public async get<T extends CommonMessage = CommonMessage>(messageId: string): Promise<T | null> {
         // from cache
-        let messageObj: CommonMessage | null | undefined = this.cache.find((msg) => msg && msg.id === messageId);
+        let messageObj: T | null = this.cache.find((msg) => msg && msg.id === messageId) as any;
         if (messageObj) {
             return messageObj;
         }
@@ -47,7 +47,7 @@ export class MessageStorage {
             if (doc) {
                 const robot = this.storages.robot;
                 if (robot) {
-                    messageObj = await robot.parseDBMessage?.(doc);
+                    messageObj = await robot.parseDBMessage?.(doc) as any;
                     return messageObj;
                 } else {
                     this.app.logger.error(`无法找到机器人配置：${this.storages.robotId}`);

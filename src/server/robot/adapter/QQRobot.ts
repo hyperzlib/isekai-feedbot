@@ -81,6 +81,13 @@ export default class QQRobot implements RobotAdapter {
     }
 
     async initRestfulApi(router: RestfulRouter) {
+        router.get('/event', (ctx: FullRestfulContext, next: koa.Next) => {
+            ctx.body = JSON.stringify({
+                status: 0,
+                message: 'Please use POST method.'
+            });
+            next();
+        });
         router.post(`/event`, this.handlePostEvent.bind(this));
     }
 
@@ -104,7 +111,9 @@ export default class QQRobot implements RobotAdapter {
             }
         }
 
-        ctx.body = 'OK';
+        ctx.body = JSON.stringify({
+            status: 1,
+        });
         await next();
     }
 
@@ -114,7 +123,7 @@ export default class QQRobot implements RobotAdapter {
         this.infoProvider.getGroupUsersInfo(userIds, groupId, rootGroupId);
 
     async parseHelpMessage(message: CommonSendMessage) {
-        const controllers = message.extra.controllers as PluginController[];
+        const controllers = (message._context.controllers ?? []) as PluginController[];
 
         let helpBuilder: string[] = [];
         if (this.description) {
@@ -290,9 +299,13 @@ export default class QQRobot implements RobotAdapter {
 
     async markRead(message: CommonReceivedMessage): Promise<boolean> {
         if (message.id) {
-            await this.callRobotApi('mark_msg_as_read', {
-                message_id: message.id
-            });
+            try {
+                await this.callRobotApi('mark_msg_as_read', {
+                    message_id: message.id
+                });
+            } catch(err) {
+                this.app.logger.warn("[QQRobot] 当前API不支持markRead");
+            }
         }
         return true;
     }

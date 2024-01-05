@@ -1,13 +1,13 @@
-import App from "../App";
-import { CommonReceivedMessage } from "../message/Message";
-import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "../PluginManager";
+import App from "#ibot/App";
+import { CommonReceivedMessage } from "#ibot/message/Message";
+import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
 import { encode as gptEncode } from 'gpt-3-encoder';
 import got, { OptionsOfTextResponseBody } from "got/dist/source";
 import { HttpsProxyAgent } from 'hpagent';
 import { ProxyAgent } from 'undici';
 import { FetchEventSourceInit, fetchEventSource } from '@waylaidwanderer/fetch-event-source';
-import { RandomMessage } from "../utils/RandomMessage";
-import { MessageTypingSimulator } from "../utils/MessageTypingSimulator";
+import { RandomMessage } from "#ibot/utils/RandomMessage";
+import { MessageTypingSimulator } from "#ibot/utils/MessageTypingSimulator";
 
 import OpenCC from 'opencc';
 
@@ -177,7 +177,7 @@ export default class ChatGPTController implements PluginController {
         this.event.registerCommand({
             command: 'ai',
             name: '开始对话',
-        }, (args, message, resolve) => {
+        }, async (args, message, resolve) => {
             resolve();
 
             return this.handleChatGPTAPIChat(args, message, true, 'saved', true);
@@ -195,7 +195,7 @@ export default class ChatGPTController implements PluginController {
         this.event.registerCommand({
             command: '重置对话',
             name: '重置对话',
-        }, (args, message, resolve) => {
+        }, async (args, message, resolve) => {
             resolve();
 
             return Promise.all([

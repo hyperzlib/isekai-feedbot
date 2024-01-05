@@ -186,7 +186,6 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                             let jsonData = JSON.parse(chunkData.data.data);
                             switch (jsonData.app) {
                                 case 'com.tencent.multimsg':
-                                    console.log('forwarding message', chunkData.data.data);
                                     if (jsonData.meta?.detail?.resid) {
                                         message.content.push({
                                             type: ['reference', 'qqforwarding'],

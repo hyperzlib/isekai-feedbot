@@ -37,7 +37,7 @@ export default class SystemController implements PluginController {
 
         let replyMsg = message.createReplyMessage();
         replyMsg.type = 'help';
-        replyMsg.extra.controllers = subscribedControllers;
+        replyMsg._context.controllers = subscribedControllers;
 
         let helpBuilder: string[] = [];
 

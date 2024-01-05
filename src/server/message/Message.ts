@@ -88,6 +88,9 @@ export class CommonMessage {
     /** 附加信息 */
     extra: any = reactive({});
 
+    /** 临时上下文信息，不会保存到数据库 */
+    _context: any = {};
+
     private _contentText?: string;
 
     public get contentText() {
@@ -235,7 +238,7 @@ export class CommonSendMessage extends CommonMessage {
     receiver: ChatIdentity;
 
     /** 回复的消息 */
-    repliedMessage?: Reactive<CommonReceivedMessage>;
+    repliedMessage?: CommonSendMessage | CommonReceivedMessage;
 
     /** 发送时间 */
     time: Date = new Date();
@@ -268,6 +271,10 @@ export class CommonSendMessage extends CommonMessage {
             extra: this.extra,
         };
     }
+
+    public async getRepliedMessage(): Promise<CommonSendMessage | CommonReceivedMessage | null> {
+        return this.repliedMessage ?? null;
+    }
 }
 
 export type SessionStoreGroup = {
@@ -294,13 +301,16 @@ export class CommonReceivedMessage extends CommonMessage {
             if (p.toString().startsWith('_')) {
                 return undefined;
             }
-            
+
             if (!target[p]) {
                 target[p] = this.getSession(p as string);
             }
             return target[p];
         },
     }) as any;
+
+    /** 回复的消息 */
+    private _repliedMessage?: CommonSendMessage | CommonReceivedMessage | null;
 
     constructor(receiver: Robot, sender: IMessageSender, messageId?: string) {
         super();
@@ -368,6 +378,18 @@ export class CommonReceivedMessage extends CommonMessage {
 
     public getSession(type: string) {
         return this.receiver.getSession(this.sender.identity, type);
+    }
+
+    public async getRepliedMessage(): Promise<CommonSendMessage | CommonReceivedMessage | null> {
+        if (this._repliedMessage === undefined) {
+            if (this.repliedId && this.receiver.storages) {
+                this._repliedMessage = await this.receiver.storages.message.get<CommonSendMessage | CommonReceivedMessage>(this.repliedId);
+            } else {
+                this._repliedMessage = null;
+            }
+        }
+
+        return this._repliedMessage;
     }
 
     public toDBObject(): MessageDataType {

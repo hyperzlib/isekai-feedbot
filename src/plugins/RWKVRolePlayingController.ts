@@ -59,8 +59,7 @@ export default class RWKVRolePlayingController implements PluginController {
     private globalDefaultCharacter: string = '';
 
     private chatGenerating = false;
-    private messageGroup: Record<string, RandomMessage> = {}
-    private botSentMessageIds = new ItemLimitedList<string>(1000);
+    private messageGroup: Record<string, RandomMessage> = {};
 
     constructor(app: App) {
         this.app = app;
@@ -135,7 +134,7 @@ export default class RWKVRolePlayingController implements PluginController {
             command: '重开',
             alias: ['重置聊天', 'remake'],
             name: '重置聊天',
-        }, (args, message, resolve) => {
+        }, async (args, message, resolve) => {
             resolve();
 
             return this.handleResetCurrentCharacter(args, message);
@@ -144,16 +143,19 @@ export default class RWKVRolePlayingController implements PluginController {
         this.event.registerCommand({
             command: '切换人物',
             name: '切换人物',
-        }, (args, message, resolve) => {
+        }, async (args, message, resolve) => {
             resolve();
 
             return this.handleChangeCharacter(args, message);
         });
 
-        this.event.on('message/focused', (message, resolve) => {
-            if (message.repliedId && message.id && !this.botSentMessageIds.includes(message.id)) {
-                // Don't reply message from other controllers
-                return;
+        this.event.on('message/focused', async (message, resolve) => {
+            if (message.repliedId && message.id) {
+                let repliedMessage = await message.getRepliedMessage();
+                if (!repliedMessage?.extra?.isRWKVReply) {
+                    // Don't reply message from other controllers
+                    return;
+                }
             }
 
             resolve();
@@ -501,9 +503,6 @@ export default class RWKVRolePlayingController implements PluginController {
             let sentMessage = await message.sendReply(replyRes, true, {
                 isRWKVReply: true
             });
-            if (sentMessage?.id) {
-                this.botSentMessageIds.addOne(sentMessage.id);
-            }
         } catch (err: any) {
             this.app.logger.error('RWKV error', err);
             console.error(err);

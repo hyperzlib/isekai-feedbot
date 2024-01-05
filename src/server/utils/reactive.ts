@@ -12,6 +12,11 @@ export type Reactive<T extends Object = any> = T & {
 export function reactive<T extends Object>(obj: T): Reactive<T> {
     const eventEmitter = new EventEmitter();
 
+    // 防止嵌套
+    if ((obj as Reactive<T>)._isReactive) {
+        return obj as Reactive<T>;
+    }
+
     // 递归监听子对象
     for (let key of Object.getOwnPropertyNames(obj)) {
         if (key.startsWith('_')) continue;
