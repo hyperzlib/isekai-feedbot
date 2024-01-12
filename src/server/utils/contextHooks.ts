@@ -1,11 +1,11 @@
-import winston from "winston";
 import App from "../App";
+import  { Logger } from './Logger';
 
 export function useApp(): App {
     return (import.meta as any)._isekaiFeedbotApp;
 }
 
-export function useLogger(): winston.Logger {
+export function useLogger(): Logger {
     return useApp().logger;
 }
 

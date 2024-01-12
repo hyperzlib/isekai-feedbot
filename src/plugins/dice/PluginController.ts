@@ -1,38 +1,29 @@
 import { CommonReceivedMessage } from "#ibot/message/Message";
 import App from "#ibot/App";
-import { CommandInputArgs, PluginController, PluginEvent } from "#ibot/PluginManager";
+import { CommandInputArgs, PluginEvent } from "#ibot/PluginManager";
+import { PluginController } from "#ibot-api/PluginController";
+import { label } from "#ibot-api/dataWrapper";
 
-export default class DiceController implements PluginController {
-    public event!: PluginEvent;
-    public app: App;
-
-    public id = 'dice';
-    public name = 'DND骰子';
-    public description = '骰一个DND骰子，格式：1d6+3';
-
-    private config!: Awaited<ReturnType<typeof this.getDefaultConfig>>;
-
-    constructor(app: App) {
-        this.app = app;
+export const defaultConfig = {
+    messages: {
+        diceFormatError: [
+            '骰子格式错误：{{{error}}}',
+            '输入错误：{{{error}}}',
+            '错误的骰子格式：{{{error}}}',
+        ]
     }
+};
+
+export default class DiceController extends PluginController<typeof defaultConfig> {
+    public static id = 'dice';
+    public static pluginName = 'DND骰子';
+    public static description = '骰一个DND骰子，格式：1d6+3';
 
     async getDefaultConfig() {
-        return {
-            messages: {
-                diceFormatError: [
-                    '骰子格式错误：{{{error}}}',
-                    '输入错误：{{{error}}}',
-                    '错误的骰子格式：{{{error}}}',
-                ]
-            }
-        };
+        return defaultConfig;
     }
 
     public async initialize(config: any): Promise<void> {
-        await this.updateConfig(config);
-
-        this.event.init(this);
-        
         this.event.registerCommand({
             command: 'roll',
             name: 'DND骰子',
@@ -54,10 +45,6 @@ export default class DiceController implements PluginController {
             
             this.randomNumber(args, message);
         });
-    }
-
-    async updateConfig(config: any) {
-        this.config = config;
     }
 
     private async rollDice(args: CommandInputArgs, message: CommonReceivedMessage) {

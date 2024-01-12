@@ -177,7 +177,7 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                 case 'reply':
                     if (chunkData.data?.id) {
                         message.repliedId = chunkData.data.id;
-                        willIgnoreMention = true; // 忽略下一个“@”
+                        // willIgnoreMention = true; // 忽略下一个“@”
                     }
                     break;
                 case 'json':
@@ -318,10 +318,10 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
             //     type: 'text',
             //     data: { text: ' ' }
             // });
-            msgChunk.unshift({
-                type: 'at',
-                data: { qq: message.repliedMessage.sender.userId }
-            });
+            // msgChunk.unshift({
+            //     type: 'at',
+            //     data: { qq: message.repliedMessage.sender.userId }
+            // });
             // msgChunk.unshift({
             //     type: 'text',
             //     data: { text: ' ' }

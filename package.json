@@ -1,6 +1,6 @@
 {
   "name": "isekai-feedbot",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "",
   "main": "index.js",
   "type": "module",
@@ -54,6 +54,7 @@
     "typescript": "^4.5.4"
   },
   "imports": {
-    "#ibot/*": "./dist/*"
+    "#ibot/*": "./dist/server/*",
+    "#ibot-api/*": "./dist/api/*"
   }
 }

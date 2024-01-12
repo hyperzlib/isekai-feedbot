@@ -1,26 +1,16 @@
-import App from "#ibot/App";
-import { PluginController, PluginEvent } from "#ibot/PluginManager";
-import { WikiMisc } from "./wiki/WikiMisc";
+import { PluginController } from "#ibot-api/PluginController";
+import { WikiMisc } from "../wiki-misc/WikiMisc";
 
 const API_ENDPOINT = 'https://www.isekai.cn/api.php';
 
-export default class IsekaiWikiController implements PluginController {
-    public event!: PluginEvent;
-    public app: App;
+export default class IsekaiWikiController extends PluginController {
+    public apiEndpoint = API_ENDPOINT;
 
-    public apiEndpoint = 'https://www.isekai.cn/api.php';
+    public static id = 'isekaiwiki';
+    public static pluginName = '异世界百科';
+    public static description = '异世界百科的相关功能';
 
-    public id = 'isekaiwiki';
-    public name = '异世界百科';
-    public description = '异世界百科的相关功能';
-
-    constructor(app: App) {
-        this.app = app;
-    }
-
-    public async initialize(): Promise<void> {
-        this.event.init(this);
-
+    public async initialize(config: any): Promise<void> {
         const wikiMisc = new WikiMisc(this.app, 'https://www.isekai.cn/api.php');
 
         this.event.registerCommand({

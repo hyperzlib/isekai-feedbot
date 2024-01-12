@@ -8,10 +8,11 @@ import { Utils } from "../../utils/Utils";
 import { FullRestfulContext, RestfulApiManager, RestfulRouter } from "../../RestfulApiManager";
 import { convertMessageToQQChunk, parseQQMessageChunk, QQAttachmentMessage, QQGroupMessage, QQGroupSender, QQPrivateMessage, QQUserSender } from "./qq/Message";
 import { CommonReceivedMessage, CommonSendMessage, MessageChunk } from "../../message/Message";
-import { PluginController } from "../../PluginManager";
 import { RobotConfig } from "../../Config";
 import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
+import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
+import { PluginController } from "#ibot-api/PluginController";
 
 export type QQRobotConfig = RobotConfig & {
     userId: string;
@@ -123,7 +124,7 @@ export default class QQRobot implements RobotAdapter {
         this.infoProvider.getGroupUsersInfo(userIds, groupId, rootGroupId);
 
     async parseHelpMessage(message: CommonSendMessage) {
-        const controllers = (message._context.controllers ?? []) as PluginController[];
+        const subscribedPlugins = (message._context.subscribed ?? []) as SubscribedPluginInfo[];
 
         let helpBuilder: string[] = [];
         if (this.description) {
@@ -136,10 +137,16 @@ export default class QQRobot implements RobotAdapter {
         );
         const mainCommandPrefix = this.wrapper.commandPrefix[0];
 
-        for (let controller of controllers) {
-            helpBuilder.push(`【${controller.name}】`);
-            if (controller.event.commandList.length > 0) {
-                controller.event.commandList.forEach(commandInfo => {
+        for (let subscribedItem of subscribedPlugins) {
+            let ctor = subscribedItem.controller.constructor as typeof PluginController;
+            helpBuilder.push(`【${ctor.pluginName}】`);
+
+            let commandList: CommandInfo[] = [];
+            for (let eventGroup of subscribedItem.eventGroups) {
+                commandList.push(...eventGroup.commandList);
+            }
+            if (commandList.length > 0) {
+                commandList.forEach(commandInfo => {
                     helpBuilder.push(`${mainCommandPrefix}${commandInfo.command} - ${commandInfo.name}`);
                 });
             } else {

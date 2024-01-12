@@ -19,6 +19,8 @@ export type SubscribeConfig = {
     }
 }
 
+export type SubscribeItem = [string, string];
+
 /**
  * 订阅管理
  */
@@ -164,7 +166,12 @@ export class SubscribeManager {
         }
     }
 
-    public getSubscribedList(robotId: string, targetType: string, targetId: string, sourceType: string): string[] {
-        return this.subscribeConfig?.[robotId]?.[targetType]?.[targetId]?.[sourceType] ?? [];
+    public getSubscribedList(robotId: string, targetType: string, targetId: string, sourceType: string): SubscribeItem[] {
+        let rawSubscribeList = this.subscribeConfig?.[robotId]?.[targetType]?.[targetId]?.[sourceType] ?? [];
+
+        return rawSubscribeList.map((sourceStr) => {
+            const t = sourceStr.split(':');
+            return [t[0], t[1] ?? '*'];
+        });
     }
 }

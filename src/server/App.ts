@@ -18,6 +18,7 @@ import { SubscribeManager, Target } from './SubscribeManager';
 import { CacheManager } from './CacheManager';
 import { StorageManager } from './StorageManager';
 import { DatabaseManager } from './DatabaseManager';
+import { Logger } from './utils/Logger';
 
 export * from './utils/contextHooks';
 
@@ -29,7 +30,8 @@ export default class App {
 
     public debug: boolean = false;
 
-    public logger!: winston.Logger;
+    public baseLogger!: winston.Logger;
+    public logger!: Logger;
     public event!: EventManager;
     public cache!: CacheManager;
     public storage!: StorageManager;
@@ -42,16 +44,18 @@ export default class App {
     public plugin!: PluginManager;
     public restfulApi!: RestfulApiManager;
 
-    constructor(configFile: string) {
+    public constructor(configFile: string, initImmediate: boolean = true) {
         this.config = Yaml.parse(fs.readFileSync(configFile, { encoding: 'utf-8' }));
         this.debug = this.config.debug;
 
         (import.meta as any)._isekaiFeedbotApp = this;
 
-        this.initialize();
+        if (initImmediate) {
+            this.initialize();
+        }
     }
 
-    async initialize() {
+    public async initialize() {
         await this.initModules();
         await this.initRestfulApiManager();
         await this.initEventManager();
@@ -68,21 +72,21 @@ export default class App {
         this.logger.info('初始化完成，正在接收消息');
     }
 
-    async initModules() {
+    private async initModules() {
         await Setup.initHandlebars();
         
         // 创建Logger
-        const loggerFormat = winston.format.printf(({ level, message, timestamp }) => {
+        const loggerFormat = winston.format.printf(({ level, message, timestamp, tag }) => {
             return `${timestamp} [${level}]: ${message}`;
         });
 
-        this.logger = winston.createLogger({
+        this.baseLogger = winston.createLogger({
             level: 'info',
-            format: winston.format.json(),
+            format: winston.format.json(), 
         });
 
         if (this.debug) {
-            this.logger.add(
+            this.baseLogger.add(
                 new winston.transports.Console({
                     format: winston.format.combine(
                         winston.format.timestamp(),
@@ -95,7 +99,7 @@ export default class App {
                 })
             );
         } else {
-            this.logger.add(
+            this.baseLogger.add(
                 new winston.transports.Console({
                     format: winston.format.combine(
                         winston.format.timestamp(),
@@ -107,64 +111,70 @@ export default class App {
                 })
             );
         }
+
+        this.logger = this.getLogger("Core");
     }
 
-    async initRestfulApiManager() {
+    private async initRestfulApiManager() {
         this.restfulApi = new RestfulApiManager(this, this.config.http_api);
         await this.restfulApi.initialize();
     }
 
-    async initEventManager() {
+    private async initEventManager() {
         this.event = new EventManager(this);
         await this.event.initialize();
     }
 
-    async initCacheManager() {
+    private async initCacheManager() {
         this.cache = new CacheManager(this, this.config.cache);
         await this.cache.initialize();
     }
 
-    async initStorageManager() {
+    private async initStorageManager() {
         this.storage = new StorageManager(this, this.config.storage);
         await this.storage.initialize();
     }
 
-    async initDatabaseManager() {
+    private async initDatabaseManager() {
         if (this.config.db) {
             this.database = new DatabaseManager(this, this.config.db);
             await this.database.initialize();
         }
     }
 
-    async initRobot() {
+    private async initRobot() {
         this.robot = new RobotManager(this, this.config.robot);
         await this.robot.initialize();
     }
 
-    async initProviderManager() {
+    private async initProviderManager() {
         this.provider = new ProviderManager(this);
         await this.provider.initialize();
     }
 
-    async initServiceManager() {
+    private async initServiceManager() {
         this.service = new ServiceManager(this, this.config.service);
         await this.service.initialize();
     }
 
-    async initSubscribeManager() {
+    private async initSubscribeManager() {
         this.subscribe = new SubscribeManager(this, this.config.subscribe_config);
         await this.subscribe.initialize();
     }
 
-    async initChannelManager() {
+    private async initChannelManager() {
         this.channel = new ChannelManager(this, this.config.channel_config_path);
 
         await this.channel.initialize();
     }
 
-    async initPluginManager() {
+    private async initPluginManager() {
         this.plugin = new PluginManager(this, this.config.plugin_path, this.config.plugin_config_path);
         await this.plugin.initialize();
+    }
+
+    public getLogger(tag: string) {
+        return new Logger(this.baseLogger, tag);
     }
 
     /**
@@ -172,15 +182,15 @@ export default class App {
      * @param serviceName 服务名称
      * @returns
      */
-    getService<T extends Service>(serviceName: string): T {
+    public getService<T extends Service>(serviceName: string): T {
         return this.service.get<T>(serviceName);
     }
 
-    createChannel(provider: string, channelId: string, config: ChannelConfig): BaseProvider | null {
+    public createChannel(provider: string, channelId: string, config: ChannelConfig): BaseProvider | null {
         return this.provider.create(provider, channelId, config);
     }
 
-    getChannelSubscriber(channelId: string, robotId: string): Target[] | null {
+    public getChannelSubscriber(channelId: string, robotId: string): Target[] | null {
         return this.subscribe.getSubscriber('channel:' + channelId, robotId);
     }
 
@@ -190,7 +200,7 @@ export default class App {
      * @param messages 消息内容
      * @returns
      */
-    async sendPushMessage(channelId: string, messages: MultipleMessage): Promise<void> {
+    public async sendPushMessage(channelId: string, messages: MultipleMessage): Promise<void> {
         this.logger.info(`[${channelId}] 消息: `, messages);
         console.log(messages);
         this.robot.sendPushMessage(channelId, messages);

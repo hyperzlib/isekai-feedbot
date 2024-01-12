@@ -52,32 +52,37 @@ export class QQInfoProvider {
 
     async refreshRobotInfo() {
         // 刷新群信息
-        let remoteGroupList = await this.getGroupList();
-        remoteGroupList.forEach((data) => {
-            if (data.group_id) {
-                let oldGroupIndex = this.groupList.findIndex((info) => info.groupId === data.group_id);
+        try {
+            let remoteGroupList = await this.getGroupList();
+            remoteGroupList.forEach((data) => {
+                if (data.group_id) {
+                    let oldGroupIndex = this.groupList.findIndex((info) => info.groupId === data.group_id);
 
-                const groupInfo: QQGroupInfo = {
-                    groupId: data.group_id,
-                    groupName: data.group_name,
-                    memberCount: data.member_count,
-                    memberLimit: data.max_member_count
-                }
-                
-                if (oldGroupIndex !== -1) {
-                    const oldGroupInfo = this.groupList[oldGroupIndex];
-                    if (compareProps(oldGroupInfo, groupInfo, ['groupName', 'memberCount', 'memberLimit'])) {
-                        return;
+                    const groupInfo: QQGroupInfo = {
+                        groupId: data.group_id,
+                        groupName: data.group_name,
+                        memberCount: data.member_count,
+                        memberLimit: data.max_member_count
+                    }
+                    
+                    if (oldGroupIndex !== -1) {
+                        const oldGroupInfo = this.groupList[oldGroupIndex];
+                        if (compareProps(oldGroupInfo, groupInfo, ['groupName', 'memberCount', 'memberLimit'])) {
+                            return;
+                        }
+
+                        this.groupList[oldGroupIndex] = groupInfo;
+                    } else {
+                        this.groupList.push(groupInfo);
                     }
 
-                    this.groupList[oldGroupIndex] = groupInfo;
-                } else {
-                    this.groupList.push(groupInfo);
+                    this.updateGroupInfo(groupInfo);
                 }
-
-                this.updateGroupInfo(groupInfo);
-            }
-        });
+            });
+        } catch (err: any) {
+            this.app.logger.error(`获取群列表失败: ${err.message}`);
+            console.error(err);
+        }
     }
 
     public saveMessage<T extends CommonMessage>(message: T): Reactive<T> {

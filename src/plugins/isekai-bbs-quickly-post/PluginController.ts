@@ -1,12 +1,13 @@
 import App from "#ibot/App";
 import { AddReplyMode, CommonReceivedMessage } from "#ibot/message/Message";
-import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
+import { CommandInputArgs, MessagePriority, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
 import { RandomMessage } from "#ibot/utils/RandomMessage";
 import { QQForwardingMessage } from "#ibot/robot/adapter/qq/Message";
 import QQRobot from "#ibot/robot/adapter/QQRobot";
 import { GroupSender } from "#ibot/message/Sender";
 import { Robot } from "#ibot/robot/Robot";
+import { PluginController } from "#ibot-api/PluginController";
 
 export type IsekaiBBSQuicklyPostConfig = {
     api_endpoint: string,
@@ -37,48 +38,38 @@ export type IsekaiQuicklyPostBody = {
     messages: IsekaiQuicklyPostMessageData[],
 };
 
-export default class IsekaiBBSQuicklyPost implements PluginController {
-    private config!: Awaited<ReturnType<typeof this.getDefaultConfig>>;
+const defaultConfig = {
+    groups: {} as Record<string, IsekaiBBSQuicklyPostConfig>,
+    messages: {
+        error: [
+            '快速发帖失败：{{{error}}}',
+            '在发帖时发生了错误：{{{error}}}',
+            '未能将这些消息转发到论坛：{{{error}}}',
+            '由于以下错误，发帖失败：{{{error}}}',
+            '很抱歉，消息无法发送至论坛，原因是：{{{error}}}。',
+            '转发消息时出现问题，错误详情：{{{error}}}。',
+            '消息无法发送到论坛，错误信息如下：{{{error}}}。',
+            '出现错误，导致消息无法成功发送至论坛：{{{error}}}。',
+            '转发消息遇到问题，以下是错误的详细信息：{{{error}}}。',
+            '发帖失败，原因是：{{{error}}}。',
+        ]
+    }
+};
 
-    public event!: PluginEvent;
-    public app: App;
+export default class IsekaiBBSQuicklyPost extends PluginController<typeof defaultConfig> {
     public chatGPTClient: any;
 
-    public id = 'isekaibbs_quicklypost';
-    public name = '异世界红茶馆 快速发帖';
-    public description = '将合并转发的内容自动发布到异世界红茶馆';
+    public static id = 'isekaibbs_quicklypost';
+    public static pluginName = '异世界红茶馆 快速发帖';
+    public static description = '将合并转发的内容自动发布到异世界红茶馆';
     
     private messageGroup: Record<string, RandomMessage> = {}
 
-    constructor(app: App) {
-        this.app = app;
-    }
-
     async getDefaultConfig() {
-        return {
-            groups: {} as Record<string, IsekaiBBSQuicklyPostConfig>,
-            messages: {
-                error: [
-                    '快速发帖失败：{{{error}}}',
-                    '在发帖时发生了错误：{{{error}}}',
-                    '未能将这些消息转发到论坛：{{{error}}}',
-                    '由于以下错误，发帖失败：{{{error}}}',
-                    '很抱歉，消息无法发送至论坛，原因是：{{{error}}}。',
-                    '转发消息时出现问题，错误详情：{{{error}}}。',
-                    '消息无法发送到论坛，错误信息如下：{{{error}}}。',
-                    '出现错误，导致消息无法成功发送至论坛：{{{error}}}。',
-                    '转发消息遇到问题，以下是错误的详细信息：{{{error}}}。',
-                    '发帖失败，原因是：{{{error}}}。',
-                ]
-            }
-        };
+        return ;
     }
 
     async initialize(config: any) {
-        await this.updateConfig(config);
-
-        this.event.init(this);
-
         this.event.registerCommand({
             command: '绑定快速发布',
             name: '绑定快速发布账号',
@@ -115,9 +106,7 @@ export default class IsekaiBBSQuicklyPost implements PluginController {
         
     }
 
-    async updateConfig(config: any) {
-        this.config = config;
-        
+    async setConfig(config: any) {
         // 随机消息
         for (let [key, value] of Object.entries(this.config.messages)) {
             this.messageGroup[key] = new RandomMessage(value);

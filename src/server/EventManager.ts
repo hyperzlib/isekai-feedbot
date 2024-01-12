@@ -5,6 +5,7 @@ import { CommonReceivedMessage } from "./message/Message";
 import { ChatIdentity } from "./message/Sender";
 import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
 import { Robot } from "./robot/Robot";
+import { SubscribeItem } from "./SubscribeManager";
 import { Reactive } from "./utils/reactive";
 
 export type ControllerEventInfo = {
@@ -131,11 +132,11 @@ export class EventManager {
                     delete this.commandList[alias.toLocaleLowerCase()];
                 });
             }
-        } else if (typeof args[0] !== 'undefined') {
-            let eventScope = args[0];
+        } else if (typeof args[0] !== 'undefined' && args[0].pluginId) {
+            let eventScope: PluginEvent = args[0];
             this.commandInfoList = this.commandInfoList.filter((commandInfoItem) => commandInfoItem.eventScope !== eventScope);
             for (let command in this.commandList) {
-                if (this.commandList[command].eventScope.controller?.id === eventScope.controller?.id) {
+                if (this.commandList[command].eventScope.pluginId === eventScope.pluginId) {
                     delete this.commandList[command];
                 }
             }
@@ -163,7 +164,7 @@ export class EventManager {
         };
 
         const buildOnError = (eventInfo: ControllerEventInfo) => (error: Error) => {
-            this.app.logger.error(`${eventInfo.eventScope.controller?.id} 处理事件 ${eventName} 时出错`, error);
+            this.app.logger.error(`[${eventInfo.eventScope.pluginId}/${eventInfo.eventScope.scopeName}] 处理事件 ${eventName} 时出错`, error);
             console.error(error);
 
             for (let arg of args) {
@@ -180,7 +181,7 @@ export class EventManager {
             }
         }
 
-        let [subscribedControllers, disabledControllers] = this.getControllerSubscribe(senderInfo);
+        let [subscribedPlugins, disabledPlugins] = this.getPluginSubscribe(senderInfo);
 
         for (let eventInfo of eventList) {
             if (!isFilter && senderInfo) {
@@ -206,18 +207,19 @@ export class EventManager {
                 }
 
                 if (senderInfo.type !== 'private') { // 私聊消息不存在订阅，只判断群消息和频道消息
-                    if (eventInfo.eventScope.autoSubscribe) {
-                        if (!eventInfo.eventScope.isAllowSubscribe(senderInfo)) {
+                    const eventScope = eventInfo.eventScope;
+                    if (eventScope.autoSubscribe) {
+                        if (!eventScope.isAllowSubscribe(senderInfo)) {
                             continue;
                         } else {
                             // 检测控制器是否已禁用
-                            if (!eventInfo.eventScope.controller || disabledControllers.includes(eventInfo.eventScope.controller.id)) {
+                            if (this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, disabledPlugins)) {
                                 continue;
                             }
                         }
                     } else {
                         // 检测控制器是否已启用
-                        if (!eventInfo.eventScope.controller || !subscribedControllers.includes(eventInfo.eventScope.controller.id)) {
+                        if (!this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, subscribedPlugins)) {
                             continue;
                         }
                     }
@@ -347,9 +349,9 @@ export class EventManager {
         }
     }
 
-    public getControllerSubscribe(senderInfo?: ChatIdentity | null): [string[], string[]] {
-        let subscribedCommands: string[] = [];
-        let disabledCommands: string[] = [];
+    public getPluginSubscribe(senderInfo?: ChatIdentity | null): [SubscribeItem[], SubscribeItem[]] {
+        let subscribedCommands: SubscribeItem[] = [];
+        let disabledCommands: SubscribeItem[] = [];
 
         if (senderInfo) {
             let targetType = '';
@@ -376,6 +378,12 @@ export class EventManager {
             subscribedCommands,
             disabledCommands
         ];
+    }
+
+    public isPluginScopeInList(pluginId: string, scopeName: string, scopeList: SubscribeItem[]): boolean {
+        return scopeList.some((scope) =>
+            scope[0] === pluginId && (scope[1] === "*" || scope[1] === scopeName)
+        );
     }
 
     private sortEvent(eventName: string) {

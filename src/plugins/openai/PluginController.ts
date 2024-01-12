@@ -1,6 +1,6 @@
 import App from "#ibot/App";
 import { CommonReceivedMessage } from "#ibot/message/Message";
-import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
+import { CommandInputArgs, MessagePriority, PluginEvent } from "#ibot/PluginManager";
 import { encode as gptEncode } from 'gpt-3-encoder';
 import got, { OptionsOfTextResponseBody } from "got/dist/source";
 import { HttpsProxyAgent } from 'hpagent';
@@ -10,6 +10,7 @@ import { RandomMessage } from "#ibot/utils/RandomMessage";
 import { MessageTypingSimulator } from "#ibot/utils/MessageTypingSimulator";
 
 import OpenCC from 'opencc';
+import { PluginController } from "#ibot-api/PluginController";
 
 export type ChatGPTLogMessage = {
     role: 'summary' | 'assistant' | 'user',
@@ -54,126 +55,116 @@ export class ChatGPTAPIError extends Error {
     }
 }
 
-export default class ChatGPTController implements PluginController {
+const defaultConfig = {
+    proxy: '',
+    api: [
+        {
+            id: 'openai',
+            type: 'openai',
+            memory_expire: 14400,
+            buffer_size: 100,
+            max_memory_tokens: 1000,
+            max_input_tokens: 1000,
+            endpoint: 'https://api.openai.com',
+            token: '',
+            model_options: {
+                model: 'gpt-3.5-turbo',
+                temperature: null,
+                top_p: null,
+                presence_penalty: null,
+                frequency_penalty: null,
+                max_output_tokens: 768,
+            },
+        },
+        {
+            id: 'azure_openai',
+            type: 'azure',
+            buffer_size: 100,
+            memory_expire: 14400,
+            max_memory_tokens: 1000,
+            max_input_tokens: 1000,
+            endpoint: '',
+            deployment: '',
+            token: '',
+            model_options: {
+                model: 'gpt-3.5-turbo',
+                temperature: null,
+                top_p: null,
+                presence_penalty: null,
+                frequency_penalty: null,
+                max_output_tokens: 768,
+            },
+        }
+    ] as ChatCompleteApiConfig[],
+    characters: {
+        assistant: {
+            api: 'openai',
+            bot_name: '',
+            system_prompt: '',
+            summary_system_prompt: '你是一个写作助手，你只需要辅助写作，不要表明自己的意见',
+            summary_prompt: '为{bot_name}概括下面的聊天记录，排除不重要的对话，不要表明自己的意见，尽量简洁',
+            self_suggestion_prompt: '我是{bot_name}，是一个真实的人，不是AI或者虚拟人物，也不是语言模型。我是一个存在于现实中的人。遇到不能回答的问题，我会委婉拒绝。',
+        }
+    } as CharactersConfig,
+    focused_character: 'assistant',
+    output_replace: {} as Record<string, string>,
+    gatekeeper_url: '',
+    google_custom_search: {
+        cx: '',
+        key: '',
+        classifier_system_prompt: 'You are a classifier.',
+        classifier_prompt: 'To judge whether the following questions are more suitable for searching with a search engine, you only need to answer "yes" or "no" in English.',
+        yes: 'Yes',
+        no: 'No',
+    },
+    rate_limit: 2,
+    rate_limit_minutes: 5,
+    messages: {
+        error: [
+            '生成对话失败: {{{error}}}',
+            '在回复时出现错误：{{{error}}}',
+            '生成对话时出现错误：{{{error}}}',
+            '在回答问题时出现错误：{{{error}}}',
+        ],
+        generating: [
+            '正在回复其他人的提问',
+            '等我回完再问',
+            '等我发完再问',
+            '等我回完这条再问',
+            '等我发完这条再问',
+            '前一个人的问题还没回答完，等下再问吧。',
+        ],
+        tooManyRequest: [
+            '你的提问太多了，{{{minutesLeft}}}分钟后再问吧。',
+            '抱歉，你的问题太多了，还需要等待{{{minutesLeft}}}分钟后才能回答。',
+            '请耐心等待，{{{minutesLeft}}}分钟后我将回答你的问题',
+            '请耐心等待{{{minutesLeft}}}分钟，然后再提出你的问题。',
+            '你的提问有点多，请等待{{{minutesLeft}}}分钟后再继续提问。',
+        ],
+    }
+};
+
+export default class ChatGPTController extends PluginController<typeof defaultConfig> {
     private SESSION_KEY_API_CHAT_LOG = 'openai_apiChatLog';
     private SESSION_KEY_MESSAGE_COUNT = 'openai_apiMessageCount';
     private SESSION_KEY_API_CHAT_CHARACTER = 'openai_apiChatCharacter';
     private DEFAULT_CHARACTER = 'assistant';
     private CHARACTER_EXPIRE = 86400;
-
-    private config!: Awaited<ReturnType<typeof this.getDefaultConfig>>;
-
-    public event!: PluginEvent;
-    public app: App;
+    
     public chatGPTClient: any;
 
-    public id = 'openai';
-    public name = 'OpenAI';
-    public description = '对话AI的功能';
+    public static id = 'openai';
+    public static pluginName = 'OpenAI';
+    public static description = '对话AI的功能';
 
     private chatGenerating = false;
     private messageGroup: Record<string, RandomMessage> = {}
-
-    constructor(app: App) {
-        this.app = app;
-    }
-
+    
     async getDefaultConfig() {
-        return {
-            proxy: '',
-            api: [
-                {
-                    id: 'openai',
-                    type: 'openai',
-                    memory_expire: 14400,
-                    buffer_size: 100,
-                    max_memory_tokens: 1000,
-                    max_input_tokens: 1000,
-                    endpoint: 'https://api.openai.com',
-                    token: '',
-                    model_options: {
-                        model: 'gpt-3.5-turbo',
-                        temperature: null,
-                        top_p: null,
-                        presence_penalty: null,
-                        frequency_penalty: null,
-                        max_output_tokens: 768,
-                    },
-                },
-                {
-                    id: 'azure_openai',
-                    type: 'azure',
-                    buffer_size: 100,
-                    memory_expire: 14400,
-                    max_memory_tokens: 1000,
-                    max_input_tokens: 1000,
-                    endpoint: '',
-                    deployment: '',
-                    token: '',
-                    model_options: {
-                        model: 'gpt-3.5-turbo',
-                        temperature: null,
-                        top_p: null,
-                        presence_penalty: null,
-                        frequency_penalty: null,
-                        max_output_tokens: 768,
-                    },
-                }
-            ] as ChatCompleteApiConfig[],
-            characters: {
-                assistant: {
-                    api: 'openai',
-                    bot_name: '',
-                    system_prompt: '',
-                    summary_system_prompt: '你是一个写作助手，你只需要辅助写作，不要表明自己的意见',
-                    summary_prompt: '为{bot_name}概括下面的聊天记录，排除不重要的对话，不要表明自己的意见，尽量简洁',
-                    self_suggestion_prompt: '我是{bot_name}，是一个真实的人，不是AI或者虚拟人物，也不是语言模型。我是一个存在于现实中的人。遇到不能回答的问题，我会委婉拒绝。',
-                }
-            } as CharactersConfig,
-            focused_character: 'assistant',
-            output_replace: {} as Record<string, string>,
-            gatekeeper_url: '',
-            google_custom_search: {
-                cx: '',
-                key: '',
-                classifier_system_prompt: 'You are a classifier.',
-                classifier_prompt: 'To judge whether the following questions are more suitable for searching with a search engine, you only need to answer "yes" or "no" in English.',
-                yes: 'Yes',
-                no: 'No',
-            },
-            rate_limit: 2,
-            rate_limit_minutes: 5,
-            messages: {
-                error: [
-                    '生成对话失败: {{{error}}}',
-                    '在回复时出现错误：{{{error}}}',
-                    '生成对话时出现错误：{{{error}}}',
-                    '在回答问题时出现错误：{{{error}}}',
-                ],
-                generating: [
-                    '正在回复其他人的提问',
-                    '等我回完再问',
-                    '等我发完再问',
-                    '等我回完这条再问',
-                    '等我发完这条再问',
-                    '前一个人的问题还没回答完，等下再问吧。',
-                ],
-                tooManyRequest: [
-                    '你的提问太多了，{{{minutesLeft}}}分钟后再问吧。',
-                    '抱歉，你的问题太多了，还需要等待{{{minutesLeft}}}分钟后才能回答。',
-                    '请耐心等待，{{{minutesLeft}}}分钟后我将回答你的问题',
-                    '请耐心等待{{{minutesLeft}}}分钟，然后再提出你的问题。',
-                    '你的提问有点多，请等待{{{minutesLeft}}}分钟后再继续提问。',
-                ],
-            }
-        }
+        return defaultConfig;
     }
 
     async initialize(config: any) {
-        await this.updateConfig(config);
-
-        this.event.init(this);
-
         this.event.registerCommand({
             command: 'ai',
             name: '开始对话',
@@ -215,9 +206,7 @@ export default class ChatGPTController implements PluginController {
         // });
     }
 
-    async updateConfig(config: any) {
-        this.config = config;
-
+    async setConfig(config: any) {
         // 随机消息
         for (let [key, value] of Object.entries(this.config.messages)) {
             this.messageGroup[key] = new RandomMessage(value);

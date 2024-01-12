@@ -2,7 +2,7 @@ var fs = require('fs');
 var Yaml = require('yaml');
 var Pusher = require('pusher');
 
-var config = Yaml.parse(fs.readFileSync('../config.yml', {encoding: 'utf-8'}));
+var config = Yaml.parse(fs.readFileSync('../config.yaml', {encoding: 'utf-8'}));
 
 var pusher = new Pusher({
   appId: config.service.pusher.app_id,

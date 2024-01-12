@@ -1,6 +1,7 @@
+import { PluginController } from "#ibot-api/PluginController";
 import App from "#ibot/App";
 import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
-import { MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
+import { MessagePriority, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
 
 export type QueueData = {
@@ -40,18 +41,28 @@ export type GPUInfoResponse = {
     temperature: number,
 }
 
-export default class StableDiffusionController implements PluginController {
-    private config!: Awaited<ReturnType<typeof this.getDefaultConfig>>;
+const defaultConfig = {
+    api: [] as ApiConfig[],
+    size: [] as SizeConfig[],
+    banned_words: [] as string[],
+    banned_output_words: [] as string[],
+    queue_max_size: 4,
+    rate_limit: 1,
+    rate_limit_minutes: 2,
+    safe_temperature: null as number | null,
+    translate_caiyunai: {
+        key: ""
+    }
+}
 
+export default class StableDiffusionController extends PluginController<typeof defaultConfig> {
     private SESSION_KEY_GENERATE_COUNT = 'stablediffusion_generateCount';
-
-    public event!: PluginEvent;
-    public app: App;
+    
     public chatGPTClient: any;
 
-    public id = 'stablediffusion';
-    public name = 'Stable Diffusion';
-    public description = '绘画生成';
+    public static id = 'stablediffusion';
+    public static pluginName = 'Stable Diffusion';
+    public static description = '绘画生成';
 
     private mainApi!: ApiConfig;
     private defaultSize!: SizeConfig;
@@ -63,31 +74,11 @@ export default class StableDiffusionController implements PluginController {
     private sizeMatcher: RegExp[][] = [];
     private bannedWordsMatcher: RegExp[] = [];
 
-    constructor(app: App) {
-        this.app = app;
-    }
-
     async getDefaultConfig() {
-        return {
-            api: [] as ApiConfig[],
-            size: [] as SizeConfig[],
-            banned_words: [] as string[],
-            banned_output_words: [] as string[],
-            queue_max_size: 4,
-            rate_limit: 1,
-            rate_limit_minutes: 2,
-            safe_temperature: null as number | null,
-            translate_caiyunai: {
-                key: ""
-            }
-        };
+        return ;
     }
 
     async initialize(config: any) {
-        await this.updateConfig(config);
-
-        this.event.init(this);
-
         this.event.registerCommand({
             command: 'draw',
             name: '使用英语短句或关键词生成绘画',
@@ -123,9 +114,7 @@ export default class StableDiffusionController implements PluginController {
         this.running = false;
     }
 
-    async updateConfig(config: any) {
-        this.config = config;
-
+    async setConfig(config: any) {
         let mainApi = this.config.api.find(api => api.main);
         if (!mainApi) {
             throw new Error('No main API found in stablediffusion config.');

@@ -3,9 +3,10 @@ import App from "#ibot/App";
 import { extname } from "path";
 import { AttachmentMessage } from "#ibot/message/Message";
 import { CommonReceivedMessage } from "#ibot/message/Message";
-import { MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
+import { MessagePriority, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
 import { RandomMessage } from "#ibot/utils/RandomMessage";
+import { PluginController } from "#ibot-api/PluginController";
 
 export type WebdavConfig = {
     url: string,
@@ -15,53 +16,43 @@ export type WebdavConfig = {
     exclusive?: boolean;
 };
 
-export default class WebdavFileBackupController implements PluginController {
-    private config!: Awaited<ReturnType<typeof this.getDefaultConfig>>;
+const defaultConfig = {
+    groups: {} as Record<string, WebdavConfig>,
+    messages: {
+        error: [
+            '转存群文件失败：{{{error}}}',
+            '在转存群文件时发生了错误：{{{error}}}',
+            '未能将群文件转存到资料库：{{{error}}}',
+            '由于以下错误，文件转存失败：{{{error}}}',
+            '很抱歉，文件无法成功转存至群组资料库，原因是：{{{error}}}。',
+            '转存群组文件时出现问题，错误详情：{{{error}}}。',
+            '文件无法转存到资料库，错误信息如下：{{{error}}}。',
+            '出现错误，导致文件无法成功转存至群组资料库：{{{error}}}。',
+            '转存群文件遇到问题，以下是错误的详细信息：{{{error}}}。',
+            '文件转存失败，原因是：{{{error}}}。',
+            '抱歉，由于以下错误，文件未能成功转存至群组资料库：{{{error}}}。',
+            '在尝试将文件转存至群组资料库时，发生了如下错误：{{{error}}}。',
+            '文件转存操作失败，错误详情：{{{error}}}。',
+        ]
+    }
+};
 
+export default class WebdavFileBackupController extends PluginController<typeof defaultConfig> {
     private SESSION_KEY_GENERATE_COUNT = 'stablediffusion_generateCount';
-
-    public event!: PluginEvent;
-    public app: App;
+    
     public chatGPTClient: any;
 
-    public id = 'webdav_file_backup';
-    public name = 'Webdav文件备份';
-    public description = '将群文件备份到Webdav服务';
+    public static id = 'webdav_file_backup';
+    public static pluginName = 'Webdav文件备份';
+    public static description = '将群文件备份到Webdav服务';
     
     private messageGroup: Record<string, RandomMessage> = {}
-
-    constructor(app: App) {
-        this.app = app;
-    }
-
+    
     async getDefaultConfig() {
-        return {
-            groups: {} as Record<string, WebdavConfig>,
-            messages: {
-                error: [
-                    '转存群文件失败：{{{error}}}',
-                    '在转存群文件时发生了错误：{{{error}}}',
-                    '未能将群文件转存到资料库：{{{error}}}',
-                    '由于以下错误，文件转存失败：{{{error}}}',
-                    '很抱歉，文件无法成功转存至群组资料库，原因是：{{{error}}}。',
-                    '转存群组文件时出现问题，错误详情：{{{error}}}。',
-                    '文件无法转存到资料库，错误信息如下：{{{error}}}。',
-                    '出现错误，导致文件无法成功转存至群组资料库：{{{error}}}。',
-                    '转存群文件遇到问题，以下是错误的详细信息：{{{error}}}。',
-                    '文件转存失败，原因是：{{{error}}}。',
-                    '抱歉，由于以下错误，文件未能成功转存至群组资料库：{{{error}}}。',
-                    '在尝试将文件转存至群组资料库时，发生了如下错误：{{{error}}}。',
-                    '文件转存操作失败，错误详情：{{{error}}}。',
-                ]
-            }
-        };
+        return defaultConfig;
     }
 
     async initialize(config: any) {
-        await this.updateConfig(config);
-
-        this.event.init(this);
-
         this.event.on('message/group', async (message, resolved) => {
             if (message.type !== 'attachment') return;
 
@@ -86,8 +77,6 @@ export default class WebdavFileBackupController implements PluginController {
     }
 
     async updateConfig(config: any) {
-        this.config = config;
-        
         // 随机消息
         for (let [key, value] of Object.entries(this.config.messages)) {
             this.messageGroup[key] = new RandomMessage(value);

@@ -1,12 +1,11 @@
-import App from "#ibot/App";
 import { CommonReceivedMessage } from "#ibot/message/Message";
-import { CommandInputArgs, MessagePriority, PluginController, PluginEvent } from "#ibot/PluginManager";
+import { CommandInputArgs, MessagePriority } from "#ibot/PluginManager";
 import { encode as gptEncode } from 'gpt-3-encoder';
 import got, { OptionsOfTextResponseBody } from "got/dist/source";
 import { HttpsProxyAgent } from 'hpagent';
 import { RandomMessage } from "#ibot/utils/RandomMessage";
-import { ItemLimitedList } from "#ibot/utils/ItemLimitedList";
 import { ChatIdentity } from "#ibot/message/Sender";
+import { PluginController } from "#ibot-api/PluginController";
 
 export type CharacterConfig = {
     api_id: string,
@@ -40,96 +39,85 @@ export class RWKVAPIError extends Error {
     }
 }
 
-export default class RWKVRolePlayingController implements PluginController {
+const defaultConfig = {
+    proxy: '',
+    api: [
+        {
+            id: 'default',
+            buffer_size: 100,
+            max_input_tokens: 1000,
+            endpoint: 'http://127.0.0.1:8888',
+            api_token: '',
+            model_options: {
+                min_len: 0,
+                temperature: 2,
+                top_p: 0.65,
+                presence_penalty: 0.2,
+                frequency_penalty: 0.2,
+            },
+        },
+    ] as ChatCompleteApiConfig[],
+    characters: {
+        default: {
+            api_id: 'default',
+            rwkv_character: '',
+            bot_name: '',
+        }
+    } as CharactersConfig,
+    default_characters: [
+        {
+            id: 'default'
+        }
+    ] as DefaultCharacterConfig[],
+    output_replace: {} as Record<string, string>,
+    rate_limit: 2,
+    rate_limit_minutes: 5,
+    messages: {
+        error: [
+            '生成对话失败: {{{error}}}',
+            '在回复时出现错误：{{{error}}}',
+            '生成对话时出现错误：{{{error}}}',
+            '在回答问题时出现错误：{{{error}}}',
+        ],
+        generating: [
+            '正在回复其他人的提问',
+            '等我回完再问',
+            '等我发完再问',
+            '等我回完这条再问',
+            '等我发完这条再问',
+            '前一个人的问题还没回答完，等下再问吧。',
+        ],
+        tooManyRequest: [
+            '你的提问太多了，{{{minutesLeft}}}分钟后再问吧。',
+            '抱歉，你的问题太多了，还需要等待{{{minutesLeft}}}分钟后才能回答。',
+            '请耐心等待，{{{minutesLeft}}}分钟后我将回答你的问题',
+            '请耐心等待{{{minutesLeft}}}分钟，然后再提出你的问题。',
+            '你的提问有点多，请等待{{{minutesLeft}}}分钟后再继续提问。',
+        ],
+    }
+};
+
+export default class RWKVRolePlayingController extends PluginController<typeof defaultConfig> {
     private SESSION_KEY_MESSAGE_COUNT = 'rwkv_rp_apiMessageCount';
     private SESSION_KEY_API_CHAT_CHARACTER = 'rwkv_rp_apiChatCharacter';
     private SESSION_KEY_API_RESET_LOCK = 'rwkv_rp_apiResetLock';
     private SESSION_KEY_USER_TOKEN = 'rwkv_rp_userToken';
     private CHARACTER_EXPIRE = 86400;
-
-    private config!: Awaited<ReturnType<typeof this.getDefaultConfig>>;
-
-    public event!: PluginEvent;
-    public app: App;
-
-    public id = 'rwkv_rp';
-    public name = 'RWKV Role Playing';
-    public description = '虚拟角色聊天AI的功能';
+    
+    public static id = 'rwkv_rp';
+    public static pluginName = 'RWKV Role Playing';
+    public static description = '虚拟角色聊天AI的功能';
 
     private globalDefaultCharacter: string = '';
 
     private chatGenerating = false;
     private messageGroup: Record<string, RandomMessage> = {};
 
-    constructor(app: App) {
-        this.app = app;
-    }
-
     async getDefaultConfig() {
-        return {
-            proxy: '',
-            api: [
-                {
-                    id: 'default',
-                    buffer_size: 100,
-                    max_input_tokens: 1000,
-                    endpoint: 'http://127.0.0.1:8888',
-                    api_token: '',
-                    model_options: {
-                        min_len: 0,
-                        temperature: 2,
-                        top_p: 0.65,
-                        presence_penalty: 0.2,
-                        frequency_penalty: 0.2,
-                    },
-                },
-            ] as ChatCompleteApiConfig[],
-            characters: {
-                default: {
-                    api_id: 'default',
-                    rwkv_character: '',
-                    bot_name: '',
-                }
-            } as CharactersConfig,
-            default_characters: [
-                {
-                    id: 'default'
-                }
-            ] as DefaultCharacterConfig[],
-            output_replace: {} as Record<string, string>,
-            rate_limit: 2,
-            rate_limit_minutes: 5,
-            messages: {
-                error: [
-                    '生成对话失败: {{{error}}}',
-                    '在回复时出现错误：{{{error}}}',
-                    '生成对话时出现错误：{{{error}}}',
-                    '在回答问题时出现错误：{{{error}}}',
-                ],
-                generating: [
-                    '正在回复其他人的提问',
-                    '等我回完再问',
-                    '等我发完再问',
-                    '等我回完这条再问',
-                    '等我发完这条再问',
-                    '前一个人的问题还没回答完，等下再问吧。',
-                ],
-                tooManyRequest: [
-                    '你的提问太多了，{{{minutesLeft}}}分钟后再问吧。',
-                    '抱歉，你的问题太多了，还需要等待{{{minutesLeft}}}分钟后才能回答。',
-                    '请耐心等待，{{{minutesLeft}}}分钟后我将回答你的问题',
-                    '请耐心等待{{{minutesLeft}}}分钟，然后再提出你的问题。',
-                    '你的提问有点多，请等待{{{minutesLeft}}}分钟后再继续提问。',
-                ],
-            }
-        }
+        return defaultConfig;
     }
 
-    async initialize(config: any) {
-        await this.updateConfig(config);
-
-        this.event.init(this);
-
+    async initialize() {
         this.event.registerCommand({
             command: '重开',
             alias: ['重置聊天', 'remake'],
@@ -175,9 +163,7 @@ export default class RWKVRolePlayingController implements PluginController {
         return JSON.parse(Buffer.from(payload, 'base64').toString());
     }
 
-    async updateConfig(config: any) {
-        this.config = config;
-
+    async setConfig(config: any) {
         // 随机消息
         for (let [key, value] of Object.entries(this.config.messages)) {
             this.messageGroup[key] = new RandomMessage(value);
@@ -248,7 +234,7 @@ export default class RWKVRolePlayingController implements PluginController {
         }
 
         let characterConf = this.config.characters[character];
-        let apiConf = this.getApiConfigById(characterConf.api);
+        let apiConf = this.getApiConfigById(characterConf.api_id);
 
         try {
             const apiUserName = this.getApiUserName(message);
@@ -435,7 +421,7 @@ export default class RWKVRolePlayingController implements PluginController {
             }
 
             characterConf = this.config.characters[character];
-            apiConf = this.getApiConfigById(characterConf.api);
+            apiConf = this.getApiConfigById(characterConf.api_id);
 
             await message.session.user.set(this.SESSION_KEY_API_CHAT_CHARACTER, character, this.CHARACTER_EXPIRE);
         } else {
@@ -444,7 +430,7 @@ export default class RWKVRolePlayingController implements PluginController {
                 character = 'assistant';
             }
             characterConf = this.config.characters[character];
-            apiConf = this.getApiConfigById(characterConf.api);
+            apiConf = this.getApiConfigById(characterConf.api_id);
         }
 
         this.app.logger.debug(`RWKV API 收到提问。当前人格：${character}`);

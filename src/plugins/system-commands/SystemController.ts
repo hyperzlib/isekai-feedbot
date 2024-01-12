@@ -1,22 +1,14 @@
+import { PluginController } from "#ibot-api/PluginController";
 import App from "#ibot/App";
 import { CommonReceivedMessage, CommonSendMessage } from "#ibot/message/Message";
-import { PluginController, PluginEvent } from "#ibot/PluginManager";
+import { CommandInfo, PluginEvent } from "#ibot/PluginManager";
 
-export default class SystemController implements PluginController {
-    public event!: PluginEvent;
-    public app: App;
-
-    public id = 'system';
-    public name = '系统功能';
-    public description = '系统功能控制器';
-
-    constructor(app: App) {
-        this.app = app;
-    }
+export default class SystemController extends PluginController {
+    public static id = 'system';
+    public static pluginName = '系统功能';
+    public static description = '系统功能控制器';
     
     async initialize() {
-        this.event.init(this);
-        
         this.event.autoSubscribe = true;
         this.event.forceSubscribe = true;
 
@@ -33,11 +25,11 @@ export default class SystemController implements PluginController {
 
     async handleHelp(args: string, message: CommonReceivedMessage) {
         const senderInfo = this.app.event.getSenderInfo(message);
-        const subscribedControllers = this.app.plugin.getSubscribedControllers(senderInfo);
+        const subscribedPlugins = this.app.plugin.getSubscribed(senderInfo);
 
         let replyMsg = message.createReplyMessage();
         replyMsg.type = 'help';
-        replyMsg._context.controllers = subscribedControllers;
+        replyMsg._context.subscribed = subscribedPlugins;
 
         let helpBuilder: string[] = [];
 
@@ -49,10 +41,16 @@ export default class SystemController implements PluginController {
 
         helpBuilder.push('功能列表：');
 
-        for (let controller of subscribedControllers) {
-            helpBuilder.push(`【${controller.name}】`);
-            if (controller.event.commandList.length > 0) {
-                controller.event.commandList.forEach(commandInfo => {
+        for (let subscribedItem of subscribedPlugins) {
+            let ctor = subscribedItem.controller.constructor as typeof PluginController;
+            helpBuilder.push(`【${ctor.pluginName}】`);
+
+            let commandList: CommandInfo[] = [];
+            for (let eventGroup of subscribedItem.eventGroups) {
+                commandList.push(...eventGroup.commandList);
+            }
+            if (commandList.length > 0) {
+                commandList.forEach(commandInfo => {
                     helpBuilder.push(`/${commandInfo.command} - ${commandInfo.name}`);
                 });
             } else {
@@ -66,7 +64,7 @@ export default class SystemController implements PluginController {
         }
 
         if (this.app.debug) {
-            this.app.logger.debug(`收到帮助指令，已找到 ${subscribedControllers.length} 个控制器`);
+            this.app.logger.debug(`收到帮助指令，已找到 ${subscribedPlugins.length} 个插件`);
         }
 
         replyMsg.content = [{
