@@ -1,1 +1,5 @@
+id: sfsettings
+name: "科幻设定百科"
+description: "科幻设定百科的相关功能"
+author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

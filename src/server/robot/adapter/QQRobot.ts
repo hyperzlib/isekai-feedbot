@@ -3,16 +3,15 @@ import got from "got/dist/source";
 
 import App from "../../App";
 import { Robot, RobotAdapter } from "../Robot";
-import { Target } from "../../SubscribeManager";
-import { Utils } from "../../utils/Utils";
-import { FullRestfulContext, RestfulApiManager, RestfulRouter } from "../../RestfulApiManager";
+import { FullRestfulContext, RestfulRouter } from "../../RestfulApiManager";
 import { convertMessageToQQChunk, parseQQMessageChunk, QQAttachmentMessage, QQGroupMessage, QQGroupSender, QQPrivateMessage, QQUserSender } from "./qq/Message";
 import { CommonReceivedMessage, CommonSendMessage, MessageChunk } from "../../message/Message";
-import { RobotConfig } from "../../Config";
+import { RobotConfig } from "../../types/config";
 import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
 import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
 import { PluginController } from "#ibot-api/PluginController";
+import { asleep } from "#ibot/utils";
 
 export type QQRobotConfig = RobotConfig & {
     userId: string;
@@ -138,8 +137,8 @@ export default class QQRobot implements RobotAdapter {
         const mainCommandPrefix = this.wrapper.commandPrefix[0];
 
         for (let subscribedItem of subscribedPlugins) {
-            let ctor = subscribedItem.controller.constructor as typeof PluginController;
-            helpBuilder.push(`【${ctor.pluginName}】`);
+            const pluginName = subscribedItem.controller.pluginInfo.name;
+            helpBuilder.push(`【${pluginName}】`);
 
             let commandList: CommandInfo[] = [];
             for (let eventGroup of subscribedItem.eventGroups) {
@@ -347,7 +346,7 @@ export default class QQRobot implements RobotAdapter {
                     if (chunk?.type === 'reply' && chunk.data?.qq && chunk.data?.time) {
                         chunk.data.id = `ref:${chunk.data.qq}:${chunk.data.time}`;
                     }
-                })
+                });
 
                 message = await parseQQMessageChunk(this, messageData.content ?? [], message);
 
@@ -368,7 +367,7 @@ export default class QQRobot implements RobotAdapter {
         if (Array.isArray(user)) { //发送给多个用户的处理
             for (let one of user) {
                 await this.sendToUser(one, message);
-                await Utils.sleep(100);
+                await asleep(100);
             }
             return;
         }
@@ -386,7 +385,7 @@ export default class QQRobot implements RobotAdapter {
         if (Array.isArray(group)) { //发送给多个群组的处理
             for (let one of group) {
                 await this.sendToGroup(one, message);
-                await Utils.sleep(100);
+                await asleep(100);
             }
             return;
         }
@@ -432,28 +431,6 @@ export default class QQRobot implements RobotAdapter {
         }
 
         return message;
-    }
-
-    /**
-     * 发送消息
-     */
-    async sendPushMessage(targets: Target[], message: string) {
-        let groupList: string[] = [];
-        let userList: string[] = [];
-        for (let target of targets) {
-            if (target.type === "group") {
-                groupList.push(target.identity);
-            } else if (target.type === "user") {
-                userList.push(target.identity);
-            }
-        }
-
-        if (groupList.length > 0) {
-            await this.sendToGroup(groupList, message);
-        }
-        if (userList.length > 0) {
-            await this.sendToUser(userList, message);
-        }
     }
 
     async deleteMessage(chatIdentity: ChatIdentity, messageId: string): Promise<boolean> {

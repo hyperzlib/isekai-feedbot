@@ -1,5 +1,5 @@
 import App from "../App";
-import { StorageConfig } from "../Config";
+import { StorageConfig } from "../types/config";
 import { CacheStore } from "../CacheManager";
 import { ChannelInfoType, RootGroupInfoType } from "../message/Sender";
 import { ModelRegistry } from "../DatabaseManager";

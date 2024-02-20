@@ -1,27 +1,37 @@
 import App from "#ibot/App";
-import { PluginEvent } from "#ibot/PluginManager";
+import { PluginEvent, PluginInstance } from "#ibot/PluginManager";
+import { CommonMessage } from "#ibot/message/Message";
 import { PluginApiBridge } from "#ibot/plugin/PluginApiBridge";
 import { Logger } from "#ibot/utils/Logger";
 
-export class PluginController<ConfigType = Record<string, string>> {
-    public static id: string;
-    public static pluginName?: string;
-    public static description?: string;
+export type PluginIndexFileType = {
+    id: string,
+    controller?: string,
+    name?: string,
+    description?: string,
+    version?: string,
+    author?: string,
+    message_path?: string,
+}
 
+export class PluginController<ConfigType = Record<string, string>> {
     public static reloadWhenConfigUpdated?: boolean;
+
+    public id: string = "";
 
     private _app: App;
     private _logger: Logger;
     private _bridge: PluginApiBridge;
+    private _pluginInfo: PluginIndexFileType;
     
     public config!: ConfigType;
 
-    constructor(app: App, pluginApi: PluginApiBridge) {
+    constructor(app: App, pluginApi: PluginApiBridge, pluginInfo: PluginIndexFileType) {
         this._app = app;
         this._bridge = pluginApi;
+        this._pluginInfo = pluginInfo;
 
-        const ctor = this.constructor as typeof PluginController;
-        this._logger = app.getLogger(ctor.pluginName ?? "Plugin");
+        this._logger = app.getLogger(pluginInfo.name ?? "Plugin");
     }
 
     public get app() {
@@ -32,12 +42,12 @@ export class PluginController<ConfigType = Record<string, string>> {
         return this._logger;
     }
 
-    public get event() {
-        return this._bridge.event;
+    public get pluginInfo() {
+        return this._pluginInfo;
     }
 
-    public getMessage(msgId: string) {
-
+    public get event() {
+        return this._bridge.event;
     }
 
     public async _initialize(config: any): Promise<void> {

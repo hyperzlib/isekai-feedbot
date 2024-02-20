@@ -2,8 +2,7 @@ import fs from "fs";
 import path from "path";
 
 import App from "./App";
-import { MultipleMessage } from "./base/provider/BaseProvider";
-import { RobotConfig } from "./Config";
+import { RobotConfig } from "./types/config";
 import { CommonGroupMessage, CommonPrivateMessage, CommonReceivedMessage } from "./message/Message";
 import { GroupSender, ChatIdentity, UserSender } from "./message/Sender";
 import { Robot, RobotAdapter } from "./robot/Robot";
@@ -74,34 +73,34 @@ export class RobotManager {
         }
     }
     
-    public async sendPushMessage(channelId: string, messages: MultipleMessage) {
-        for (let robotId in this.robots) {
-            let robot = this.robots[robotId];
-            let robotType = robot.type;
-            let currentMsg: string | null = null;
-            if (robotId in messages) {
-                currentMsg = messages[robotId];
-            } else if (robotType && robotType in messages) {
-                currentMsg = messages[robotType];
-            } else if ("base" in messages) {
-                currentMsg = messages["base"];
-            }
-            if (!currentMsg) { // 未找到消息
-                continue;
-            }
+    // public async sendPushMessage(channelId: string, messages: MultipleMessage) {
+    //     for (let robotId in this.robots) {
+    //         let robot = this.robots[robotId];
+    //         let robotType = robot.type;
+    //         let currentMsg: string | null = null;
+    //         if (robotId in messages) {
+    //             currentMsg = messages[robotId];
+    //         } else if (robotType && robotType in messages) {
+    //             currentMsg = messages[robotType];
+    //         } else if ("base" in messages) {
+    //             currentMsg = messages["base"];
+    //         }
+    //         if (!currentMsg) { // 未找到消息
+    //             continue;
+    //         }
 
-            let targets = this.app.getChannelSubscriber(channelId, robotId);
-            if (!targets) {
-                continue;
-            }
+    //         let targets = this.app.getChannelSubscriber(channelId, robotId);
+    //         if (!targets) {
+    //             continue;
+    //         }
 
-            try {
-                await robot.sendPushMessage(targets, currentMsg);
-            } catch(err) {
-                console.error(`[${channelId}] 无法发送消息到 ${robotId} : `, err);
-            }
-        }
-    }
+    //         try {
+    //             await robot.sendPushMessage(targets, currentMsg);
+    //         } catch(err) {
+    //             console.error(`[${channelId}] 无法发送消息到 ${robotId} : `, err);
+    //         }
+    //     }
+    // }
 
     public getSenderIdentity(robot: Robot, message: CommonReceivedMessage) {
         let sender: ChatIdentity = {

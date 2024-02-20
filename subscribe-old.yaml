@@ -1,0 +1,49 @@
+qq:
+  user:
+    2178551572:
+      channel:
+        - isekaiwiki/admin
+  group:
+    939938136:
+      channel:
+        - isekaiwiki
+        - isekaibbs
+        - debug/echo
+      controller:
+        - isekaiwiki
+        - stablediffusion
+        - openai
+        - webdav_file_backup
+        #- rwkv_rp
+        - dice
+    594292502:
+      controller:
+        - isekaiwiki
+          #- rwkv_rp
+        - dice
+    584432845:
+      controller:
+        - openai
+        - webdav_file_backup
+          #- rwkv_rp
+        - dice
+    765272119:
+      controller:
+        - rwkv_rp
+    538207734:
+      controller:
+        #- rwkv_rp
+        - dice
+    468068091:
+      controller:
+        - isekaibbs_quicklypost
+    304704562:
+      controller:
+        - rwkv_rp
+        - openai
+        - stablediffusion
+    166742789:
+      controller:
+        - openai
+        - rwkv_rp
+        - dice

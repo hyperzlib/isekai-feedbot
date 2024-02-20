@@ -1,1 +1,5 @@
+id: dice
+name: "DND骰子"
+description: "骰一个DND骰子，格式：1d6+3"
+author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

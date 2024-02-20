@@ -3,7 +3,6 @@ import App from "../App";
 import { CacheStore } from "../CacheManager";
 import { CommandInfo } from "../PluginManager";
 import { RestfulRouter } from "../RestfulApiManager";
-import { Target } from "../SubscribeManager";
 import { CommonReceivedMessage, CommonSendMessage, MessageChunk, CommonMessage, MessageDirection } from "../message/Message";
 import { ChatIdentity, UserInfoType, GroupInfoType, RootGroupInfoType, ChannelInfoType, GroupUserInfoType, UserSender, BaseSender, GroupSender } from "../message/Sender";
 import { MessageDataType, MessageSchemaType } from "../odm/Message";
@@ -20,7 +19,6 @@ export interface RobotAdapter {
     markRead?(message: CommonReceivedMessage): Promise<boolean>;
     sendTyping?(chatIdentity: ChatIdentity, typing: boolean): Promise<boolean>;
     sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
-    sendPushMessage(targets: Target[], message: string): Promise<any>;
     deleteMessage?(chatIdentity: ChatIdentity, messageId: string): Promise<boolean>;
     retrieveMediaUrl?(mediaMessageChunk: MessageChunk): Promise<void>;
 
@@ -136,10 +134,6 @@ export class Robot<Adapter extends RobotAdapter = any> {
         return this.adapter.sendMessage ? this.adapter.sendMessage(message) : Promise.resolve(message);
     }
 
-    public sendPushMessage(targets: Target[], message: string): Promise<any> {
-        return this.adapter.sendPushMessage ? this.adapter.sendPushMessage(targets, message) : Promise.resolve();
-    }
-
     /**
      * 删除消息
      * @param chatIdentity 
@@ -170,8 +164,9 @@ export class Robot<Adapter extends RobotAdapter = any> {
         if (this.adapter.parseDBMessage) {
             parsedMessage = await this.adapter.parseDBMessage(dbMessage);
         } else {
+            let dbChatIdentity: ChatIdentity = (dbMessage.chatIdentity as any).toObject();
             const chatIdentity: ChatIdentity = {
-                ...dbMessage.chatIdentity,
+                ...dbChatIdentity,
                 robot: this,
                 type: dbMessage.chatType,
             };

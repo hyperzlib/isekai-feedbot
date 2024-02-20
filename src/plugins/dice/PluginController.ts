@@ -15,10 +15,6 @@ export const defaultConfig = {
 };
 
 export default class DiceController extends PluginController<typeof defaultConfig> {
-    public static id = 'dice';
-    public static pluginName = 'DND骰子';
-    public static description = '骰一个DND骰子，格式：1d6+3';
-
     async getDefaultConfig() {
         return defaultConfig;
     }

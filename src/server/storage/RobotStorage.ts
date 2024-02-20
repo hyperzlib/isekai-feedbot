@@ -1,6 +1,6 @@
 import { Robot } from "#ibot/robot/Robot";
 import App from "../App";
-import { StorageConfig } from "../Config";
+import { StorageConfig } from "../types/config";
 import { ModelRegistry } from "../DatabaseManager";
 import { ChannelInfoStorage } from "./ChannelInfoStorage";
 import { GroupInfoStorage } from "./GroupInfoStorage";

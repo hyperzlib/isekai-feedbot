@@ -1,6 +1,6 @@
 import mongoose, { Model } from "mongoose";
 import App from "./App";
-import { DatabaseConfig } from "./Config";
+import { DatabaseConfig } from "./types/config";
 import { ChannelInfoModelType, ChannelInfoSchema, ChannelInfoSchemaType } from "./odm/ChannelInfo";
 import { GroupInfoModelType, GroupInfoSchema, GroupInfoSchemaType } from "./odm/GroupInfo";
 import { RootGroupInfoModelType, RootGroupInfoSchema, RootGroupInfoSchemaType } from "./odm/RootGroupInfo";

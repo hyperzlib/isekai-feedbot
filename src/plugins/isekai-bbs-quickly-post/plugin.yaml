@@ -1,1 +1,5 @@
+id: isekaibbs_quicklypost
+name: "异世界红茶馆 快速发帖"
+description: "将合并转发的内容自动发布到异世界红茶馆"
+author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

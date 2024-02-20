@@ -1,9 +1,8 @@
 import Handlebars from "handlebars";
-import { Utils } from "./utils/Utils";
+import { excerpt, getCurrentDate } from "./utils";
 
 export class Setup {
-    public static initHandlebars() {
-
+    public static async initHandlebars() {
         Handlebars.registerHelper('excerpt', (...args) => {
             if (args.length > 2) {
                 let text: any = args[0];
@@ -12,11 +11,11 @@ export class Setup {
                 if (args.length > 3) {
                     ellipsis = args[2];
                 }
-                return Utils.excerpt(text, parseInt(maxLength), ellipsis);
+                excerpt(text, parseInt(maxLength), ellipsis);
             }
             return args[0];
         });
 
-        Handlebars.registerHelper('currentDate', Utils.getCurrentDate);
+        Handlebars.registerHelper('currentDate', getCurrentDate);
     }
 }

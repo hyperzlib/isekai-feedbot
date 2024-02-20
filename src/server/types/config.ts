@@ -1,11 +1,16 @@
-import { JsonFilterConfig } from "./generator/JsonFilter";
-import { RegexFilterConfig } from "./generator/RegexFilter";
+// import { JsonFilterConfig } from "./generator/JsonFilter";
+// import { RegexFilterConfig } from "./generator/RegexFilter";
 
 export type Config = {
-    channel_config_path: string;
     plugin_config_path: string;
+    plugin_data_path: string;
     plugin_path: string;
+
+    channel_config_path: string;
     subscribe_config: string;
+    role_config: string;
+    user_role_binding_config: string;
+
     debug: boolean;
     robot: Record<string, RobotConfig>;
     service: Record<string, ServiceConfig>;
@@ -61,8 +66,8 @@ export type StorageConfig = {
 export type ChannelConfig = any;
 
 export type GeneratorConfig = {
-    json: JsonFilterConfig;
-    match: RegexFilterConfig;
+    // json: JsonFilterConfig;
+    // match: RegexFilterConfig;
     tpl: any;
 };
 

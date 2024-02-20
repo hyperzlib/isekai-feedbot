@@ -1,5 +1,5 @@
-id: openai
-name: "OpenAI"
-description: "对话AI的功能"
+id: channel
+name: "Channel"
+description: "基础推送服务"
 author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

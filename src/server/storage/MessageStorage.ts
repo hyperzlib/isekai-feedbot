@@ -1,5 +1,5 @@
 import App from "../App";
-import { StorageConfig } from "../Config";
+import { StorageConfig } from "../types/config";
 import { ModelRegistry } from "../DatabaseManager";
 import { ItemLimitedList } from "../utils/ItemLimitedList";
 import { CommonMessage, CommonSendMessage } from "../message/Message";

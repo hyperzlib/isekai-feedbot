@@ -1,9 +1,7 @@
 import App from "./App";
 
 interface ImportMeta {
-    context: {
-        isekaiFeedbotApp: App;
-    }
+    _isekaiFeedbotApp: App;
 }
 
 declare module "bson" {

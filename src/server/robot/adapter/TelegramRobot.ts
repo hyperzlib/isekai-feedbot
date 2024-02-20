@@ -1,12 +1,11 @@
 import TelegramBot from "node-telegram-bot-api";
 import App from "../../App";
-import { RobotConfig } from "../../Config";
+import { RobotConfig } from "../../types/config";
 import { CommonSendMessage } from "../../message/Message";
 import { ChatIdentity } from "../../message/Sender";
 import { CommandInfo } from "../../PluginManager";
-import { Target } from "../../SubscribeManager";
-import { Utils } from "../../utils/Utils";
 import { RobotAdapter } from "../Robot";
+import { asleep } from "#ibot/utils";
 
 export type TelegramRobotConfig = RobotConfig & {
     token: string;
@@ -84,7 +83,7 @@ export default class TelegramRobot implements RobotAdapter {
         if(Array.isArray(chatId)){ //发送给多个群组的处理
             for (let one of chatId) {
                 await this.sendToChat(one, message);
-                await Utils.sleep(100);
+                await asleep(100);
             }
             return;
         }
@@ -98,18 +97,5 @@ export default class TelegramRobot implements RobotAdapter {
      */
     async sendMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
         return message;
-    }
-
-    /**
-     * 发送机器人消息
-     * @param targets 发送目标
-     * @param message 消息内容
-     */
-    async sendPushMessage(targets: Target[], message: string): Promise<void> {
-        let chatIdList: number[] = [];
-        for (let target of targets) {
-            chatIdList.push(parseInt(target.identity));
-        }
-        await this.sendToChat(chatIdList, message);
     }
 }

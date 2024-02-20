@@ -1,10 +1,10 @@
 import { CacheStore } from "../CacheManager";
 import { MessageDataType, chatIdentityToDB } from "../odm/Message";
 import { BaseSender, ChatIdentity, GroupSender, IMessageSender, UserSender } from "./Sender";
-import { LiteralUnion } from "../utils/types";
-import { Utils } from "../utils/Utils";
+import { LiteralUnion } from "../types/misc";
 import { Robot } from "#ibot/robot/Robot";
 import { Reactive, reactive } from "#ibot/utils/reactive";
+import { escapeHtml } from "#ibot/utils";
 
 export enum MessageDirection {
     RECEIVE = 1,
@@ -42,6 +42,14 @@ export interface RecordMessage extends MessageChunk {
         url: string;
         speech_to_text?: string;
     };
+}
+
+export interface VideoMessage extends MessageChunk {
+    data: {
+        url: string;
+        fileName?: string;
+        size?: number;
+    }
 }
 
 export interface AttachmentMessage extends MessageChunk {
@@ -99,7 +107,7 @@ export class CommonMessage {
                 if (chunk.text !== null) {
                     return chunk.text;
                 } else if (chunk.data) {
-                    return '<json>' + Utils.escapeHtml(JSON.stringify(chunk.data)) + '</json>';
+                    return '<json>' + escapeHtml(JSON.stringify(chunk.data)) + '</json>';
                 } else {
                     return '';
                 }

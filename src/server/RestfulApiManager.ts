@@ -1,6 +1,6 @@
 import App from "./App";
 import Koa from 'koa';
-import { RestfulApiConfig } from "./Config";
+import { RestfulApiConfig } from "./types/config";
 import Router from "koa-router";
 import { makeRoutes } from "./restful/routes";
 import { koaBody } from "koa-body";

@@ -58,10 +58,6 @@ const defaultConfig = {
 
 export default class IsekaiBBSQuicklyPost extends PluginController<typeof defaultConfig> {
     public chatGPTClient: any;
-
-    public static id = 'isekaibbs_quicklypost';
-    public static pluginName = '异世界红茶馆 快速发帖';
-    public static description = '将合并转发的内容自动发布到异世界红茶馆';
     
     private messageGroup: Record<string, RandomMessage> = {}
 

@@ -3,10 +3,13 @@ import App from "#ibot/App";
 import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
 import { MessagePriority, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
+import ChatGPTController from "../openai/PluginController";
 
 export type QueueData = {
     message: CommonReceivedMessage,
     prompt: string,
+    subjectType?: string,
+    paintSize?: string,
 };
 
 export type ApiConfig = {
@@ -15,6 +18,8 @@ export type ApiConfig = {
     sampler_name?: string,
     steps?: number,
     trigger_words?: string[],
+    subject_types?: string[],
+    append_prompt?: string,
     negative_prompt?: string,
     banned_words?: string[],
     api_params?: Record<string, any>,
@@ -22,6 +27,7 @@ export type ApiConfig = {
 };
 
 export type SizeConfig = {
+    id: string,
     width: number,
     height: number,
     default?: boolean,
@@ -41,6 +47,15 @@ export type GPUInfoResponse = {
     temperature: number,
 }
 
+const LLM_PROMPT: string = "Please generate the Stable Diffusion prompt according to the following requirements. The output format is:\n" +
+'```{"prompt": "[prompt content]", "size": "(portrait|landscape|avatar)", "subject": "(boy|girl|item|landscape|animal)"}```.\n' +
+'The prompt should in simple English. You need to describe the scene in detail. here are some formula for a Stable Diffusion image prompt:' +
+' - For characters: An image of [adjective] [subject] with [clothing, earring and accessories] [doing action], [1boy, 1girl, 2boys and then]\n' +
+' - For landscapes and items: An image of [subject] with [some creative details]\n' +
+'\n' +
+'请根据以下要求生成：\n' +
+'画{{{prompt}}}';
+
 const defaultConfig = {
     api: [] as ApiConfig[],
     size: [] as SizeConfig[],
@@ -52,17 +67,13 @@ const defaultConfig = {
     safe_temperature: null as number | null,
     translate_caiyunai: {
         key: ""
-    }
+    },
 }
 
 export default class StableDiffusionController extends PluginController<typeof defaultConfig> {
     private SESSION_KEY_GENERATE_COUNT = 'stablediffusion_generateCount';
     
     public chatGPTClient: any;
-
-    public static id = 'stablediffusion';
-    public static pluginName = 'Stable Diffusion';
-    public static description = '绘画生成';
 
     private mainApi!: ApiConfig;
     private defaultSize!: SizeConfig;
@@ -80,8 +91,9 @@ export default class StableDiffusionController extends PluginController<typeof d
 
     async initialize(config: any) {
         this.event.registerCommand({
-            command: 'draw',
+            command: 'paint',
             name: '使用英语短句或关键词生成绘画',
+            alias: ['draw'],
         }, (args, message, resolve) => {
             resolve();
 
@@ -124,6 +136,7 @@ export default class StableDiffusionController extends PluginController<typeof d
         let defaultSize = this.config.size.find(size => size.default);
         if (!defaultSize) {
             defaultSize = {
+                id: "default",
                 width: 512,
                 height: 512
             };
@@ -175,35 +188,104 @@ export default class StableDiffusionController extends PluginController<typeof d
         }
 
         prompt = prompt.trim();
-        this.app.logger.debug("收到绘图请求: " + prompt);
+        this.logger.debug("收到绘图请求: " + prompt);
 
-        if (options.useTranslate) {
-            prompt = await this.translateCaiyunAI(prompt);
-            this.app.logger.debug("Prompt翻译结果: " + prompt);
-            if (!prompt) {
-                await message.sendReply('尝试翻译出错，过会儿再试试吧。', true);
-                return;
+        let paintSize: string | undefined;
+        let subjectType: string | undefined;
+
+        let llmApi = this.app.getPlugin<ChatGPTController>('openai');
+        if (llmApi) {
+            // 使用ChatGPT生成Prompt
+            let messageList: any[] = [
+                { role: 'system', content: 'You are a helpful assistant.' },
+                { role: 'user', content: LLM_PROMPT.replace(/\{\{\{prompt\}\}\}/g, prompt) }
+            ];
+
+            try {
+                let replyRes = await llmApi.doApiRequest(messageList);
+                let containsPrompt = false;
+                if (replyRes.message) {
+                    let reply = replyRes.message;
+                    this.logger.debug(`ChatGPT返回: ${reply}`);
+                    let matchedJson = reply.match(/\{.*\}/);
+                    if (matchedJson) {
+                        let promptRes = JSON.parse(matchedJson[0]);
+                        if (promptRes) {
+                            prompt = promptRes.prompt;
+                            paintSize = promptRes.size;
+                            subjectType = promptRes.subject;
+                            this.logger.debug(`ChatGPT生成Prompt结果: ${prompt}, 画幅: ${paintSize}, 类型: ${subjectType}`);
+                            containsPrompt = true;
+                        }
+                    } else {
+                        await message.sendReply(`生成Prompt失败: ${reply}`, true);
+                        return;
+                    }
+                } else {
+                    await message.sendReply(`生成Prompt失败: Prompt生成器返回为空`, true);
+                    return;
+                }
+            } catch (err: any) {
+                this.logger.error("ChatGPT生成Prompt失败", err);
+                console.error(err);
+
+                if (err.name === 'HTTPError' && err.response) {
+                    switch (err.response.statusCode) {
+                        case 429:
+                            await message.sendReply('太频繁了，过会儿再试试呗。', true);
+                            return;
+                    }
+                } else if (err.name === 'RequestError') {
+                    await message.sendReply(`连接失败：${err.message}，过会儿再试试呗。`, true);
+                    return;
+                } else if (err.name === 'ChatGPTAPIError') {
+                    if (err.json) {
+                        if (err.json.error?.code === 'content_filter') {
+                            await message.sendReply('逆天', true);
+                            return;
+                        }
+                    }
+                }
+
+                await message.sendReply(`生成图片失败: ${err.message}`, true);
+            }
+        } else if (options.useTranslate) {
+            if (prompt.match(/[\u4e00-\u9fa5]/)) {
+                prompt = await this.translateCaiyunAI(prompt);
+                this.logger.debug("Prompt翻译结果: " + prompt);
+                if (!prompt) {
+                    await message.sendReply('尝试翻译出错，过会儿再试试吧。', true);
+                    return;
+                }
+            } else {
+                this.logger.debug("Prompt不需要翻译");
             }
         }
 
-        let api = this.getMostMatchedApi(prompt);
+        let api = this.getMostMatchedApi(prompt, subjectType);
         // 检查是否有禁用词
         for (let matcher of this.bannedWordsMatcher) {
             if (prompt.match(matcher)) {
-                await message.sendReply(`生成图片失败：关键词中包含禁用的内容。`, true);
+                await message.sendReply(`生成图片失败：关键词中包含禁止的内容。`, true);
                 return;
             }
         }
         for (let matcher of api._banned_words_matcher!) {
             if (prompt.match(matcher)) {
-                await message.sendReply(`生成图片失败：关键词中包含禁用的内容。`, true);
+                await message.sendReply(`生成图片失败：关键词中包含禁止的内容。`, true);
                 return;
             }
+        }
+
+        if (api.append_prompt) {
+            prompt += ', ' + api.append_prompt;
         }
 
         this.queue.push({
             message,
             prompt,
+            subjectType,
+            paintSize,
         });
     }
 
@@ -231,7 +313,7 @@ export default class StableDiffusionController extends PluginController<typeof d
                 return res.target[0];
             }
         } catch (e) {
-            this.app.logger.error("无法翻译", e);
+            this.logger.error("无法翻译", e);
             console.error(e);
         }
         return null;
@@ -244,7 +326,7 @@ export default class StableDiffusionController extends PluginController<typeof d
                 return res;
             }
         } catch (e) {
-            this.app.logger.error("无法读取GPU信息", e);
+            this.logger.error("无法读取GPU信息", e);
             console.error(e);
         }
         return null;
@@ -265,7 +347,16 @@ export default class StableDiffusionController extends PluginController<typeof d
         return -1;
     }
 
-    public getMostMatchedApi(prompt: string) {
+    public getMostMatchedApi(prompt: string, subjectType?: string) {
+        if (subjectType) {
+            for (let api of this.config.api) {
+                if (api.subject_types?.includes(subjectType)) {
+                    return api;
+                }
+            }
+            this.logger.warn("未找到匹配类型 " + subjectType + " 的API");
+        }
+
         let mostMatchedApiIndex = this.getMostMatchedIndex(prompt, this.apiMatcher);
         if (mostMatchedApiIndex >= 0) {
             return this.config.api[mostMatchedApiIndex];
@@ -274,7 +365,16 @@ export default class StableDiffusionController extends PluginController<typeof d
         }
     }
 
-    public getMostMatchedSize(prompt: string) {
+    public getMostMatchedSize(prompt: string, paintSize?: string) {
+        if (paintSize) {
+            let size = this.config.size.find(size => size.id === paintSize);
+            if (size) {
+                return size;
+            } else {
+                this.logger.warn("未找到匹配尺寸 " + paintSize);
+            }
+        }
+
         let mostMatchedSizeIndex = this.getMostMatchedIndex(prompt, this.sizeMatcher);
         if (mostMatchedSizeIndex >= 0) {
             return this.config.size[mostMatchedSizeIndex];
@@ -304,13 +404,13 @@ export default class StableDiffusionController extends PluginController<typeof d
         // Start generating
         const currentTask = this.queue.shift()!;
 
-        this.app.logger.debug("开始生成图片: " + currentTask.prompt);
+        this.logger.debug("开始生成图片: " + currentTask.prompt);
 
-        let api = this.getMostMatchedApi(currentTask.prompt);
-        this.app.logger.debug("使用API: " + api.endpoint);
+        let api = this.getMostMatchedApi(currentTask.prompt, currentTask.subjectType);
+        this.logger.debug("使用API: " + api.endpoint);
 
-        let size = this.getMostMatchedSize(currentTask.prompt);
-        this.app.logger.debug("使用尺寸: " + size.width + "x" + size.height);
+        let size = this.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
+        this.logger.debug("使用尺寸: " + size.width + "x" + size.height);
 
         let extraApiParams = api.api_params ?? {};
 
@@ -329,7 +429,7 @@ export default class StableDiffusionController extends PluginController<typeof d
                 }
             }).json<any>();
             if (Array.isArray(txt2imgRes.images) && txt2imgRes.images.length > 0) {
-                this.app.logger.debug("生成图片成功，开始检查图片内容");
+                this.logger.debug("生成图片成功，开始检查图片内容");
 
                 let image = txt2imgRes.images[0];
 
@@ -343,7 +443,7 @@ export default class StableDiffusionController extends PluginController<typeof d
 
                 if (interrogateRes.caption) {
                     let caption = interrogateRes.caption;
-                    this.app.logger.debug("DeepDanbooru导出关键字：" + caption);
+                    this.logger.debug("DeepDanbooru导出关键字：" + caption);
 
                     let keywords = caption.split(',').map((keyword: string) => keyword.trim());
                     let bannedKeywords = this.config.banned_words;
@@ -369,7 +469,7 @@ export default class StableDiffusionController extends PluginController<typeof d
                 ], false);
             }
         } catch (e: any) {
-            this.app.logger.error("生成图片失败：" + e.message);
+            this.logger.error("生成图片失败：" + e.message);
             console.error(e);
             await currentTask.message.sendReply('生成图片失败：' + e.message, true);
             return;

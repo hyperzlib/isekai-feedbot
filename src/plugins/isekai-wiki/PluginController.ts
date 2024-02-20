@@ -6,10 +6,6 @@ const API_ENDPOINT = 'https://www.isekai.cn/api.php';
 export default class IsekaiWikiController extends PluginController {
     public apiEndpoint = API_ENDPOINT;
 
-    public static id = 'isekaiwiki';
-    public static pluginName = '异世界百科';
-    public static description = '异世界百科的相关功能';
-
     public async initialize(config: any): Promise<void> {
         const wikiMisc = new WikiMisc(this.app, 'https://www.isekai.cn/api.php');
 

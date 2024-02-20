@@ -4,14 +4,7 @@ import { CommonReceivedMessage, CommonSendMessage } from "#ibot/message/Message"
 import { CommandInfo, PluginEvent } from "#ibot/PluginManager";
 
 export default class SystemController extends PluginController {
-    public static id = 'system';
-    public static pluginName = '系统功能';
-    public static description = '系统功能控制器';
-    
     async initialize() {
-        this.event.autoSubscribe = true;
-        this.event.forceSubscribe = true;
-
         this.event.registerCommand({
             command: '帮助',
             name: '获取帮助',
@@ -42,8 +35,8 @@ export default class SystemController extends PluginController {
         helpBuilder.push('功能列表：');
 
         for (let subscribedItem of subscribedPlugins) {
-            let ctor = subscribedItem.controller.constructor as typeof PluginController;
-            helpBuilder.push(`【${ctor.pluginName}】`);
+            let controller = subscribedItem.controller;
+            helpBuilder.push(`【${controller.pluginInfo.name}】`);
 
             let commandList: CommandInfo[] = [];
             for (let eventGroup of subscribedItem.eventGroups) {

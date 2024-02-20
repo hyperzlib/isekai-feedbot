@@ -103,10 +103,6 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
     private SESSION_KEY_API_RESET_LOCK = 'rwkv_rp_apiResetLock';
     private SESSION_KEY_USER_TOKEN = 'rwkv_rp_userToken';
     private CHARACTER_EXPIRE = 86400;
-    
-    public static id = 'rwkv_rp';
-    public static pluginName = 'RWKV Role Playing';
-    public static description = '虚拟角色聊天AI的功能';
 
     private globalDefaultCharacter: string = '';
 
@@ -140,9 +136,16 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
         this.event.on('message/focused', async (message, resolve) => {
             if (message.repliedId && message.id) {
                 let repliedMessage = await message.getRepliedMessage();
-                if (!repliedMessage?.extra?.isRWKVReply) {
-                    // Don't reply message from other controllers
-                    return;
+                if (repliedMessage) {
+                    if (!repliedMessage.extra?.isRWKVReply) {
+                        // 不回复其他控制器发出的消息
+                        return;
+                    }
+
+                    if ((repliedMessage.receiver as ChatIdentity)?.userId !== message.sender.userId) {
+                        // 不回复其他人的消息
+                        return;
+                    }
                 }
             }
 
@@ -417,7 +420,7 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
             character = await message.session.user.get<string>(this.SESSION_KEY_API_CHAT_CHARACTER) ?? this.getDefaultCharacter(message);
             if (!(character in this.config.characters)) {
                 this.app.logger.debug(`RWKV API 人物 ${character} 不存在，使用默认人物`);
-                character = 'assistant';
+                character = this.globalDefaultCharacter;
             }
 
             characterConf = this.config.characters[character];
@@ -427,7 +430,7 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
         } else {
             if (!(character in this.config.characters)) {
                 this.app.logger.debug(`RWKV API 人格 ${character} 不存在，使用默认人格`);
-                character = 'assistant';
+                character = this.globalDefaultCharacter;
             }
             characterConf = this.config.characters[character];
             apiConf = this.getApiConfigById(characterConf.api_id);

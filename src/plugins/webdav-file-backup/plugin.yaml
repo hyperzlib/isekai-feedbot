@@ -1,1 +1,5 @@
+id: webdav_file_backup
+name: "Webdav文件备份"
+description: "将群文件备份到Webdav服务"
+author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

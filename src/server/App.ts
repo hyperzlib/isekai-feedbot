@@ -4,21 +4,19 @@ import Yaml from 'yaml';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
-import { BaseProvider, MultipleMessage } from './base/provider/BaseProvider';
 import { Setup } from './Setup';
-import { ChannelManager } from './ChannelManager';
-import { ChannelConfig, Config } from './Config';
+import { ChannelConfig, Config } from './types/config';
 import { EventManager } from './EventManager';
-import { PluginManager } from './PluginManager';
-import { ProviderManager } from './ProviderManager';
+import { PluginInstance, PluginManager } from './PluginManager';
 import { RestfulApiManager } from './RestfulApiManager';
 import { RobotManager } from './RobotManager';
-import { Service, ServiceManager } from './ServiceManager';
-import { SubscribeManager, Target } from './SubscribeManager';
+import { SubscribeManager } from './SubscribeManager';
 import { CacheManager } from './CacheManager';
 import { StorageManager } from './StorageManager';
 import { DatabaseManager } from './DatabaseManager';
 import { Logger } from './utils/Logger';
+import { PluginController } from '#ibot-api/PluginController';
+import * as Utils from './utils';
 
 export * from './utils/contextHooks';
 
@@ -37,10 +35,7 @@ export default class App {
     public storage!: StorageManager;
     public database?: DatabaseManager;
     public robot!: RobotManager;
-    public provider!: ProviderManager;
-    public service!: ServiceManager;
     public subscribe!: SubscribeManager;
-    public channel!: ChannelManager;
     public plugin!: PluginManager;
     public restfulApi!: RestfulApiManager;
 
@@ -63,10 +58,7 @@ export default class App {
         await this.initStorageManager();
         await this.initDatabaseManager();
         await this.initRobot();
-        await this.initProviderManager();
-        await this.initServiceManager();
         await this.initSubscribeManager();
-        await this.initChannelManager();
         await this.initPluginManager();
 
         this.logger.info('初始化完成，正在接收消息');
@@ -147,30 +139,18 @@ export default class App {
         await this.robot.initialize();
     }
 
-    private async initProviderManager() {
-        this.provider = new ProviderManager(this);
-        await this.provider.initialize();
-    }
-
-    private async initServiceManager() {
-        this.service = new ServiceManager(this, this.config.service);
-        await this.service.initialize();
-    }
-
     private async initSubscribeManager() {
         this.subscribe = new SubscribeManager(this, this.config.subscribe_config);
         await this.subscribe.initialize();
     }
 
-    private async initChannelManager() {
-        this.channel = new ChannelManager(this, this.config.channel_config_path);
-
-        await this.channel.initialize();
+    private async initPluginManager() {
+        this.plugin = new PluginManager(this, this.config.plugin_path, this.config.plugin_config_path, this.config.plugin_data_path);
+        await this.plugin.initialize();
     }
 
-    private async initPluginManager() {
-        this.plugin = new PluginManager(this, this.config.plugin_path, this.config.plugin_config_path);
-        await this.plugin.initialize();
+    public get utils() {
+        return Utils;
     }
 
     public getLogger(tag: string) {
@@ -178,31 +158,20 @@ export default class App {
     }
 
     /**
-     * 获取服务
-     * @param serviceName 服务名称
-     * @returns
+     * 获取插件控制器
+     * @param pluginId 插件ID
+     * @returns 
      */
-    public getService<T extends Service>(serviceName: string): T {
-        return this.service.get<T>(serviceName);
-    }
-
-    public createChannel(provider: string, channelId: string, config: ChannelConfig): BaseProvider | null {
-        return this.provider.create(provider, channelId, config);
-    }
-
-    public getChannelSubscriber(channelId: string, robotId: string): Target[] | null {
-        return this.subscribe.getSubscriber('channel:' + channelId, robotId);
+    public getPlugin<T extends PluginController<any> = PluginController>(pluginId: string): T | null {
+        return this.plugin.getPluginController<T>(pluginId) ?? null;
     }
 
     /**
-     * 发送推送消息
-     * @param channelId Channel ID
-     * @param messages 消息内容
-     * @returns
+     * 获取插件实例
+     * @param pluginId 插件ID
+     * @returns 
      */
-    public async sendPushMessage(channelId: string, messages: MultipleMessage): Promise<void> {
-        this.logger.info(`[${channelId}] 消息: `, messages);
-        console.log(messages);
-        this.robot.sendPushMessage(channelId, messages);
+    public getPluginInstance<T extends PluginController = PluginController>(pluginId: string): PluginInstance<T> | null {
+        return this.plugin.getPluginInstance<T>(pluginId) ?? null;
     }
 }

@@ -1,6 +1,11 @@
 config.yaml
 subscribe.yaml
+user-role.yaml
 node_modules/
+channel-backup/
 dist/
 *.zip
+*.tar.gz
 configs/
+config/
+data/

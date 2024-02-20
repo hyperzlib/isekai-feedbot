@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node --es-module-specifier-resolution=node index.js",
-    "dev": "tsc && node --es-module-specifier-resolution=node index.js",
-    "build": "tsc"
+    "dev": "npm run build && node --es-module-specifier-resolution=node index.js",
+    "build": "tsc && node post-build.js"
   },
   "author": {
     "name": "hyperzlib",

@@ -41,10 +41,6 @@ export default class WebdavFileBackupController extends PluginController<typeof 
     private SESSION_KEY_GENERATE_COUNT = 'stablediffusion_generateCount';
     
     public chatGPTClient: any;
-
-    public static id = 'webdav_file_backup';
-    public static pluginName = 'Webdav文件备份';
-    public static description = '将群文件备份到Webdav服务';
     
     private messageGroup: Record<string, RandomMessage> = {}
     

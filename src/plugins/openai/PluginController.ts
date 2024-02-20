@@ -153,10 +153,6 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
     
     public chatGPTClient: any;
 
-    public static id = 'openai';
-    public static pluginName = 'OpenAI';
-    public static description = '对话AI的功能';
-
     private chatGenerating = false;
     private messageGroup: Record<string, RandomMessage> = {}
     
@@ -301,6 +297,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
      */
     private async makeSummary(messageLogList: ChatGPTApiMessage[], characterConf: CharacterConfig) {
         let chatLog: string[] = [];
+
         messageLogList.forEach((messageData) => {
             if (messageData.role === 'summary' || messageData.role === 'assistant') {
                 chatLog.push(`${characterConf.bot_name}: ${messageData.message}`);
@@ -381,7 +378,12 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         throw new Error('Unknown API type: ' + apiConf.type);
     }
 
-    private async doApiRequest(messageList: any[], apiConf: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
+    public async doApiRequest(messageList: any[], apiConf?: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
+        if (!apiConf) {
+            let characterConf = this.config.characters[this.DEFAULT_CHARACTER]!;
+            apiConf = this.getApiConfigById(characterConf.api);
+        }
+
         switch (apiConf.type) {
             case 'openai':
             case 'azure':
@@ -391,7 +393,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         throw new Error('Unknown API type: ' + apiConf.type);
     }
 
-    private async doOpenAILikeApiRequest(messageList: any[], apiConf: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
+    public async doOpenAILikeApiRequest(messageList: any[], apiConf: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
         let modelOpts = Object.fromEntries(Object.entries({
             model: apiConf.model_options.model,
             temperature: apiConf.model_options.temperature,
@@ -784,7 +786,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 await message.session.chat.set(this.SESSION_KEY_API_CHAT_LOG, messageLogList, apiConf.memory_expire);
             }
         } catch (err: any) {
-            this.app.logger.error('ChatGPT error', err);
+            this.app.logger.error('ChatGPT error', err.message);
             console.error(err);
 
             if (err.name === 'HTTPError' && err.response) {
@@ -798,6 +800,13 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 let msg = this.messageGroup.error.nextMessage({ error: '连接失败：' + err.message });
                 await message.sendReply(msg ?? `连接失败：${err.message}，过会儿再试试呗。`, true);
                 return;
+            } else if (err.name === 'ChatGPTAPIError') {
+                if (err.json) {
+                    if (err.json.error?.code === 'content_filter') {
+                        await message.sendReply('逆天', true);
+                        return;
+                    }
+                }
             }
 
             let msg = this.messageGroup.error.nextMessage({ error: err.message });

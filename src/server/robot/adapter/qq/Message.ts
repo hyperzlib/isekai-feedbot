@@ -10,7 +10,8 @@ import {
     MentionMessage,
     MessageChunk,
     TextMessage,
-    RecordMessage
+    RecordMessage,
+    VideoMessage
 } from "../../../message/Message";
 import { GroupSender, UserSender } from "../../../message/Sender";
 import QQRobot, { QQGroupInfo } from "../QQRobot";
@@ -42,12 +43,16 @@ export interface QQRecordMessage extends RecordMessage {
     };
 }
 
-export interface QQUrlMessage extends TextMessage {
-    type: ['text', 'qqurl'];
+export interface QQVideoMessage extends VideoMessage {
+    type: ['video', 'qqvideo'];
     data: {
         url: string;
-        title: string;
-    };
+        fileName?: string;
+    }
+}
+
+export interface QQUrlMessage extends TextMessage {
+    type: ['text', 'qqurl'];
 }
 
 export interface QQAttachmentMessage extends AttachmentMessage {
@@ -135,6 +140,16 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                         }
                     } as QQRecordMessage);
                     break;
+                case 'video':
+                    message.content.push({
+                        type: ['video', 'qqvideo'],
+                        text: '[视频]',
+                        data: {
+                            url: chunkData.data?.url ?? '',
+                            fileName: chunkData.data?.file,
+                        }
+                    } as QQVideoMessage);
+                    break;
                 case 'face':
                     if (chunkData.data?.id) {
                         let emojiChar = qqFaceToEmoji(parseInt(chunkData.data.id));
@@ -180,6 +195,16 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                         // willIgnoreMention = true; // 忽略下一个“@”
                     }
                     break;
+                case 'forward':
+                    if (chunkData.data?.id) {
+                        message.content.push({
+                            type: ['reference', 'qqforwarding'],
+                            text: '[合并转发消息]',
+                            data: {
+                                res_id: chunkData.data.id
+                            }
+                        } as QQForwardingMessage);
+                    }
                 case 'json':
                     if (typeof chunkData.data?.data === 'string' && chunkData.data.data.length < 2048) {
                         try {
@@ -235,7 +260,7 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                                     }
                                     break;
                                 default:
-                                    console.log('unknown message', chunkData);
+                                    console.log('unknown json message', chunkData);
                             }
                         } catch (_) { }
                     }

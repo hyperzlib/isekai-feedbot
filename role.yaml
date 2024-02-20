@@ -1,0 +1,22 @@
+roles:
+  root:
+    name: ROOT管理员
+    accessLevel: 100
+  botAdmin:
+    name: 机器人管理员
+    accessLevel: 90
+  groupCreator:
+    name: 群主
+    accessLevel: 20
+    roleBinding:
+      - qq-group-owner
+  groupAdmin:
+    name: 管理员
+    accessLevel: 10
+    roleBinding:
+      - qq-group-admin
+  user:
+    name: 用户
+    accessLevel: 1
+    roleBinding:
+      - user

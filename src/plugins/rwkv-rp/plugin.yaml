@@ -1,1 +1,5 @@
+id: rwkv_rp
+name: "RWKV Role Playing"
+description: "虚拟角色聊天AI的功能"
+author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

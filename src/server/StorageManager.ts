@@ -1,5 +1,5 @@
 import App from "./App";
-import { StorageConfig } from "./Config";
+import { StorageConfig } from "./types/config";
 import { RobotStorage } from "./storage/RobotStorage";
 import { UserInfoStorage } from "./storage/UserInfoStorage";
 

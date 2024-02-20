@@ -1,6 +1,6 @@
 import { ShuffleRandom } from "./ShuffleRandom";
 import Handlebars from "handlebars";
-import { Pair } from "./types";
+import { Pair } from "../types/misc";
 
 export class RandomMessage extends ShuffleRandom<Pair<string, HandlebarsTemplateDelegate<any>>> {
     constructor(messageList: string[] = []) {

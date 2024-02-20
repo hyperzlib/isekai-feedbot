@@ -1,5 +1,5 @@
 import App from "../../../App";
-import { compareProps } from "../../../utils/func";
+import { compareProps } from "../../../utils/helpers";
 import { QQGroupSender, QQUserSender } from "./Message";
 import { GroupInfoType, GroupUserInfoType, UserInfoType } from "../../../message/Sender";
 import { CommonMessage } from "../../../message/Message";

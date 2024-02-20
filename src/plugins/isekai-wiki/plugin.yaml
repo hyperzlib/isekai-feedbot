@@ -1,1 +1,5 @@
+id: isekaiwiki
+name: "异世界百科"
+description: "异世界百科的相关功能"
+author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

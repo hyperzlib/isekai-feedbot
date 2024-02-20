@@ -8,11 +8,11 @@ import App from "./App";
 import EventEmitter from "events";
 import path from "path";
 import { ChatIdentity } from "./message/Sender";
-import { Utils } from "./utils/Utils";
 import { Robot } from "./robot/Robot";
 import { Reactive } from "./utils/reactive";
-import { PluginController } from "#ibot-api/PluginController";
+import { PluginController, PluginIndexFileType } from "#ibot-api/PluginController";
 import { PluginApiBridge } from "./plugin/PluginApiBridge";
+import { compareObject, prepareDir } from "./utils";
 
 export const MessagePriority = {
     LOWEST: 0,
@@ -68,17 +68,20 @@ export type SubscribedPluginInfo = {
     eventGroups: PluginEvent[],
 }
 
-export type PluginInstance = {
+export type PluginInstance<Controller extends PluginController = PluginController> = {
     id: string,
     path: string,
     bridge: PluginApiBridge,
-    controller: PluginController,
+    controller: Controller,
 }
+
+export const MAIN_CONFIG_FILE = 'main_config.yaml';
 
 export class PluginManager extends EventEmitter {
     private app: App;
     private pluginPath: string;
     private configPath: string;
+    private dataPath: string;
 
     private watcher!: chokidar.FSWatcher;
     private configWatcher!: chokidar.FSWatcher;
@@ -86,19 +89,21 @@ export class PluginManager extends EventEmitter {
     public pluginInstanceMap: Record<string, PluginInstance> = {};
     public configPluginMap: Record<string, string> = {};
 
-    constructor(app: App, pluginPath: string, configPath: string) {
+    constructor(app: App, pluginPath: string, configPath: string, dataPath: string) {
         super();
 
         this.app = app;
         this.pluginPath = path.resolve(pluginPath);
         this.configPath = path.resolve(configPath);
+        this.dataPath = path.resolve(dataPath);
+        
         this.pluginInstanceMap = {};
     }
 
     /**
      * 加载所有Controllers
      */
-    async initialize() {
+    public async initialize() {
         // this.watcher = chokidar.watch(this.pluginPath + "/**/*.js", {
         //     ignorePermissionErrors: true,
         //     persistent: true,
@@ -118,14 +123,14 @@ export class PluginManager extends EventEmitter {
             await this.loadPlugin(pluginPath);
         }
 
-        this.configWatcher = chokidar.watch(this.configPath + '/plugin/*.yaml', {
+        this.configWatcher = chokidar.watch(path.join(this.configPath, '**/*.yaml'), {
             ignorePermissionErrors: true,
             persistent: true
         });
         this.configWatcher.on('change', this.reloadConfig.bind(this));
     }
 
-    async loadPlugin(folder: string) {
+    public async loadPlugin(folder: string) {
         folder = path.resolve(folder);
         this.app.logger.debug('尝试从 ' + folder + ' 加载插件');
         const pluginIndexFile = path.join(folder, 'plugin.yaml');
@@ -133,10 +138,14 @@ export class PluginManager extends EventEmitter {
 
         let pluginId = '';
         try {
-            const pluginIndex = Yaml.parse(await fsAsync.readFile(pluginIndexFile, 'utf-8'));
+            const pluginIndex = Yaml.parse(await fsAsync.readFile(pluginIndexFile, 'utf-8')) as PluginIndexFileType;
             
             if (!pluginIndex || typeof pluginIndex.controller !== "string") {
                 this.app.logger.error('插件 ' + folder + ' 没有指定主文件');
+                return;
+            }
+            if (typeof pluginIndex.id !== "string") {
+                this.app.logger.error('插件 ' + folder + ' 没有指定ID');
                 return;
             }
             if (!pluginIndex.controller.endsWith('.js')) {
@@ -144,6 +153,7 @@ export class PluginManager extends EventEmitter {
             }
 
             const controllerFile = path.join(folder, pluginIndex.controller);
+            pluginId = pluginIndex.id;
 
             if (!fs.existsSync(controllerFile)) {
                 this.app.logger.error('插件 ' + folder + ' 控制器 ' + controllerFile + ' 不存在');
@@ -153,44 +163,39 @@ export class PluginManager extends EventEmitter {
             const controller = await import(controllerFile);
             if (controller) {
                 const controllerClass: typeof PluginController = controller.default ?? controller;
-                if (controllerClass.id) {
-                    pluginId = controllerClass.id;
-                    
-                    const pluginApiBridge = new PluginApiBridge(this.app, pluginId);
-                    const controllerInstance: PluginController = new controllerClass(this.app, pluginApiBridge);
+                
+                const pluginApiBridge = new PluginApiBridge(this.app, pluginId);
+                const controllerInstance: PluginController = new controllerClass(this.app, pluginApiBridge, pluginIndex);
 
-                    const pluginInstance: PluginInstance = {
-                        id: pluginId,
-                        path: folder,
-                        bridge: pluginApiBridge,
-                        controller: controllerInstance
-                    };
+                const pluginInstance: PluginInstance = {
+                    id: pluginId,
+                    path: folder,
+                    bridge: pluginApiBridge,
+                    controller: controllerInstance
+                };
 
-                    pluginApiBridge.setController(controllerInstance);
+                pluginApiBridge.setController(controllerInstance);
 
-                    let isReload = false;
-                    if (pluginId in this.pluginInstanceMap) {
-                        // Reload plugin
-                        isReload = true;
-                        await this.unloadPlugin(pluginId, true);
-                    }
-
-                    this.pluginInstanceMap[pluginId] = pluginInstance;
-
-                    if (isReload) {
-                        this.app.logger.info(`已重新加载插件: ${pluginId}`);
-                        this.emit('pluginReloaded', controllerInstance);
-                    } else {
-                        this.app.logger.info(`已加载插件: ${pluginId}`);
-                        this.emit('pluginLoaded', controllerInstance);
-                    }
-
-                    const controllerConfig = await this.loadMainConfig(pluginId, controllerInstance);
-
-                    await controllerInstance._initialize(controllerConfig);
-                } else {
-                    throw new Error('PluginController ID is not defined.');
+                let isReload = false;
+                if (pluginId in this.pluginInstanceMap) {
+                    // Reload plugin
+                    isReload = true;
+                    await this.unloadPlugin(pluginId, true);
                 }
+
+                this.pluginInstanceMap[pluginId] = pluginInstance;
+
+                if (isReload) {
+                    this.app.logger.info(`已重新加载插件: ${pluginId}`);
+                    this.emit('pluginReloaded', controllerInstance);
+                } else {
+                    this.app.logger.info(`已加载插件: ${pluginId}`);
+                    this.emit('pluginLoaded', controllerInstance);
+                }
+
+                const controllerConfig = await this.loadMainConfig(pluginId, controllerInstance);
+
+                await controllerInstance._initialize(controllerConfig);
             } else {
                 throw new Error('PluginController does not have an export.');
             }
@@ -204,10 +209,10 @@ export class PluginManager extends EventEmitter {
         }
     }
 
-    async unloadPlugin(pluginId: string, isReload = false) {
+    public async unloadPlugin(pluginId: string, isReload = false) {
         const instance = this.pluginInstanceMap[pluginId];
         if (instance) {
-            const configFile = this.getConfigFile(pluginId);
+            const configFile = this.getPluginMainConfigPath(pluginId);
 
             await instance.bridge.destroy();
             await instance.controller.destroy?.();
@@ -225,14 +230,14 @@ export class PluginManager extends EventEmitter {
         }
     }
 
-    async reloadPlugin(pluginId: string) {
+    public async reloadPlugin(pluginId: string) {
         let pluginInstance = this.pluginInstanceMap[pluginId];
         if (!pluginInstance) return;
 
         await this.loadPlugin(pluginInstance.path);
     }
 
-    getPluginPathFromFile(filePath: string) {
+    public getPluginPathFromFile(filePath: string) {
         if (filePath.startsWith(this.pluginPath)) {
             return filePath.substring(this.pluginPath.length + 1).split(path.sep)[0];
         } else {
@@ -240,16 +245,20 @@ export class PluginManager extends EventEmitter {
         }
     }
 
-    onPluginFileChanged(filePath: string) {
+    public onPluginFileChanged(filePath: string) {
         // Unfinished
     }
 
-    getConfigFile(pluginId: string) {
-        return path.resolve(this.configPath, "plugin", pluginId + '.yaml');
+    public getPluginConfigPath(pluginId: string) {
+        return path.resolve(this.configPath, pluginId);
     }
 
-    async loadMainConfig(pluginId: string, controller: PluginController) {
-        const configFile = this.getConfigFile(pluginId);
+    public getPluginMainConfigPath(pluginId: string) {
+        return path.resolve(this.configPath, pluginId, MAIN_CONFIG_FILE);
+    }
+
+    private async loadMainConfig(pluginId: string, controller: PluginController) {
+        const configFile = this.getPluginMainConfigPath(pluginId);
         try {
             if (configFile in this.configPluginMap) { // 防止保存时触发重载
                 delete this.configPluginMap[configFile];
@@ -262,7 +271,7 @@ export class PluginManager extends EventEmitter {
             if (fs.existsSync(configFile)) {
                 let localConfig = Yaml.parse(await fsAsync.readFile(configFile, 'utf-8'));
                 config = {...defaultConfig, ...localConfig};
-                if (!Utils.compare(config, localConfig)) {
+                if (!compareObject(config, localConfig)) {
                     shouldFill = true;
                     this.app.logger.info(`配置文件已生成: ${configFile}`);
                 }
@@ -271,7 +280,7 @@ export class PluginManager extends EventEmitter {
             }
 
             if (shouldFill) {
-                Utils.prepareDir(path.dirname(configFile));
+                prepareDir(path.dirname(configFile));
                 await fsAsync.writeFile(configFile, Yaml.stringify(config));
             }
 
@@ -286,7 +295,7 @@ export class PluginManager extends EventEmitter {
         }
     }
 
-    async reloadConfig(file: string) {
+    public async reloadConfig(file: string) {
         this.app.logger.info(`配置文件已更新: ${file}`);
         if (file in this.configPluginMap) {
             const pluginId = this.configPluginMap[file];
@@ -316,7 +325,7 @@ export class PluginManager extends EventEmitter {
      * @returns 
      */
     public getSubscribed(senderInfo: ChatIdentity): SubscribedPluginInfo[] {
-        let [subscribedScopes, disabledScopes] = this.app.event.getPluginSubscribe(senderInfo);
+        let subscribedScopes = this.app.event.getPluginSubscribe(senderInfo);
 
         let subscribed: SubscribedPluginInfo[] = [];
         for (let pluginInstance of Object.values(this.pluginInstanceMap)) {
@@ -347,22 +356,9 @@ export class PluginManager extends EventEmitter {
                         break;
                 }
 
-                if (senderInfo.type !== 'private') { // 私聊消息不存在订阅，只判断群消息和频道消息
-                    if (eventGroup.autoSubscribe) {
-                        if (!eventGroup.isAllowSubscribe(senderInfo)) {
-                            continue;
-                        } else {
-                            // 检测控制器是否已禁用
-                            if (this.app.event.isPluginScopeInList(pluginInstance.id, scopeName, disabledScopes)) {
-                                continue;
-                            }
-                        }
-                    } else {
-                        // 检测控制器是否已启用
-                        if (!this.app.event.isPluginScopeInList(pluginInstance.id, scopeName, subscribedScopes)) {
-                            continue;
-                        }
-                    }
+                // 检测控制器是否已启用
+                if (!this.app.event.isPluginScopeInList(pluginInstance.id, scopeName, subscribedScopes)) {
+                    continue;
                 }
 
                 eventGroups.push(eventGroup);
@@ -378,6 +374,22 @@ export class PluginManager extends EventEmitter {
         }
 
         return subscribed;
+    }
+
+    public getPluginDataPath(pluginId: string, creation: boolean = false) {
+        const dataPath = path.resolve(this.dataPath, pluginId);
+        if (creation) {
+            prepareDir(dataPath);
+        }
+        return dataPath;
+    }
+
+    public getPluginController<T extends PluginController>(pluginId: string): T | null {
+        return (this.pluginInstanceMap[pluginId]?.controller ?? null) as any;
+    }
+
+    public getPluginInstance<T extends PluginController>(pluginId: string): PluginInstance<T> | null {
+        return (this.pluginInstanceMap[pluginId] ?? null) as any;
     }
 }
 
@@ -452,6 +464,12 @@ export class EventScope {
      * @param options Options
      */
     public on(event: 'raw/event', callback: RawEventCallback, options?: MessageEventOptions): void
+    /**
+     * Add config updated handler.
+     * @param event Event name
+     * @param callback Callback function
+     */
+    public on(event: 'configUpdated', callback: (config: any) => void): void
     /**
      * Add other event handler.
      * @param event Event name
@@ -592,8 +610,6 @@ export class EventScope {
 }
 
 export class PluginEvent extends EventScope {
-    public autoSubscribe = false;
-    public forceSubscribe = false;
     public showInSubscribeList = true;
 
     public allowPrivate = true;

@@ -1,11 +1,11 @@
 import App from "./App";
-import { CommandOverrideConfig } from "./Config";
+import { CommandOverrideConfig } from "./types/config";
 import { PermissionDeniedError, RateLimitError } from "./error/errors";
 import { CommonReceivedMessage } from "./message/Message";
 import { ChatIdentity } from "./message/Sender";
 import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
 import { Robot } from "./robot/Robot";
-import { SubscribeItem } from "./SubscribeManager";
+import { SubscribeItem, SubscribeTargetInfo } from "./SubscribeManager";
 import { Reactive } from "./utils/reactive";
 
 export type ControllerEventInfo = {
@@ -181,7 +181,7 @@ export class EventManager {
             }
         }
 
-        let [subscribedPlugins, disabledPlugins] = this.getPluginSubscribe(senderInfo);
+        let subscribedPlugins = this.getPluginSubscribe(senderInfo);
 
         for (let eventInfo of eventList) {
             if (!isFilter && senderInfo) {
@@ -206,23 +206,11 @@ export class EventManager {
                         break;
                 }
 
-                if (senderInfo.type !== 'private') { // 私聊消息不存在订阅，只判断群消息和频道消息
-                    const eventScope = eventInfo.eventScope;
-                    if (eventScope.autoSubscribe) {
-                        if (!eventScope.isAllowSubscribe(senderInfo)) {
-                            continue;
-                        } else {
-                            // 检测控制器是否已禁用
-                            if (this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, disabledPlugins)) {
-                                continue;
-                            }
-                        }
-                    } else {
-                        // 检测控制器是否已启用
-                        if (!this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, subscribedPlugins)) {
-                            continue;
-                        }
-                    }
+                const eventScope = eventInfo.eventScope;
+                
+                // 检测控制器是否已禁用
+                if (!this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, subscribedPlugins)) {
+                    continue;
                 }
             }
 
@@ -349,40 +337,32 @@ export class EventManager {
         }
     }
 
-    public getPluginSubscribe(senderInfo?: ChatIdentity | null): [SubscribeItem[], SubscribeItem[]] {
+    public getPluginSubscribe(senderInfo?: ChatIdentity | null): SubscribeItem[] {
         let subscribedCommands: SubscribeItem[] = [];
-        let disabledCommands: SubscribeItem[] = [];
 
         if (senderInfo) {
-            let targetType = '';
-            let targetId = '';
-            switch (senderInfo.type) {
-                case 'private':
-                    targetType = 'user';
-                    targetId = senderInfo.userId!;
-                    break;
-                case 'group':
-                    targetType = 'group';
-                    targetId = senderInfo.groupId!;
-                    break;
-                case 'channel':
-                    targetType = 'channel';
-                    targetId = senderInfo.channelId!;
-                    break;
+            let targetInfo: SubscribeTargetInfo = {
+                robot: senderInfo.robot.robotId!,
+            };
+
+            if (senderInfo.type === 'private') {
+                targetInfo.user = true;
+            } else if (senderInfo.type === 'channel') {
+                targetInfo.channel = senderInfo.channelId;
+            } else if (senderInfo.type === 'group') {
+                targetInfo.group = senderInfo.groupId;
+                targetInfo.rootGroup = senderInfo.rootGroupId;
             }
-            subscribedCommands = this.app.subscribe.getSubscribedList(senderInfo.robot.robotId!, targetType, targetId, 'controller');
-            disabledCommands = this.app.subscribe.getSubscribedList(senderInfo.robot.robotId!, targetType, targetId, 'disable_controller');
+            
+            subscribedCommands = this.app.subscribe.getSubscribeItems(targetInfo);
         }
 
-        return [
-            subscribedCommands,
-            disabledCommands
-        ];
+        return subscribedCommands;
     }
 
-    public isPluginScopeInList(pluginId: string, scopeName: string, scopeList: SubscribeItem[]): boolean {
-        return scopeList.some((scope) =>
-            scope[0] === pluginId && (scope[1] === "*" || scope[1] === scopeName)
+    public isPluginScopeInList(pluginId: string, scopeName: string, subList: SubscribeItem[]): boolean {
+        return subList.some((subItem) =>
+            subItem.id === pluginId && (subItem.scope === "*" || subItem.scope === scopeName)
         );
     }
 

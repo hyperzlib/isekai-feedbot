@@ -2,7 +2,7 @@ import { caching, Cache } from "cache-manager";
 import { redisStore } from "cache-manager-ioredis-yet";
 
 import App from "./App";
-import { CacheConfig as CacheConfig } from "./Config";
+import { CacheConfig as CacheConfig } from "./types/config";
 import { RateLimitError } from "./error/errors";
 
 export class CacheManager {
@@ -10,6 +10,7 @@ export class CacheManager {
     private config: CacheConfig;
 
     private store!: Cache;
+    private internalStore!: Cache;
 
     constructor(app: App, config: CacheConfig) {
         this.app = app;
@@ -37,6 +38,8 @@ export class CacheManager {
             this.store = await caching('memory', cacheOption);
             this.app.logger.info(`使用内存数据库作为CacheStore`);
         }
+
+        this.internalStore = await caching('memory');
     }
 
     /**
@@ -46,6 +49,15 @@ export class CacheManager {
      */
     public getStore(path: string[]): CacheStore {
         return new CacheStore(this.store, path);
+    }
+
+    /**
+     * 获取内部CacheStore
+     * @param path 
+     * @returns 
+     */
+    public getInternalStore(path: string[]): CacheStore {
+        return new CacheStore(this.internalStore, path);
     }
 }
 
