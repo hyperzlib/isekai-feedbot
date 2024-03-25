@@ -3,6 +3,7 @@ import Yaml from "yaml";
 import chokidar from 'chokidar';
 
 import App from "./App";
+import { ReactiveConfig } from "./utils/ReactiveConfig";
 
 export type SubscribeItem = {
     id: string,
@@ -38,8 +39,9 @@ export type SubscribeConfig = {
  */
 export class SubscribeManager {
     private app: App;
+
     private subscribeFile: string;
-    private watcher!: chokidar.FSWatcher;
+    private subConfig!: ReactiveConfig<SubscribeConfig>;
 
     private fileWillChange: boolean = false;
 
@@ -53,19 +55,17 @@ export class SubscribeManager {
         this.targetSubMap = {};
         this.allTargetSubMap = {};
         this.subTargetMap = {};
-
-        this.loadSubscribeFile();
     }
 
     public async initialize() {
-        this.watcher = chokidar.watch(this.subscribeFile, {
-            ignorePermissionErrors: true,
-            persistent: true
-        });
+        this.subConfig = new ReactiveConfig<SubscribeConfig>(this.subscribeFile, {});
         
-        this.watcher.on('change', () => {
+        await this.subConfig.load();
+        this.buildSubscribeMap(this.subConfig.value);
+        
+        this.subConfig.on('change', (val, oldVal) => {
             if (!this.fileWillChange) {
-                this.reloadSubscribeFile();
+                this.reloadSubscribeFile(val, oldVal);
             } else {
                 this.fileWillChange = false;
             }
@@ -73,10 +73,9 @@ export class SubscribeManager {
     }
 
     /**
-     * 加载订阅文件
+     * 构建订阅表
      */
-    private loadSubscribeFile() {
-        let subscribeMap: SubscribeConfig = Yaml.parse(fs.readFileSync(this.subscribeFile, { encoding: 'utf-8' }));
+    private buildSubscribeMap(subscribeMap: SubscribeConfig) {
         if (subscribeMap) {
             for (let robotId in subscribeMap) {
                 if (robotId === 'global') {
@@ -144,13 +143,13 @@ export class SubscribeManager {
     /**
      * 重载订阅文件
      */
-    private reloadSubscribeFile() {
+    private reloadSubscribeFile(val: SubscribeConfig, oldVal: SubscribeConfig) {
         // 先不比较了，直接全部清除
         this.subTargetMap = {};
         this.allTargetSubMap = {};
         this.targetSubMap = {};
 
-        this.loadSubscribeFile();
+        this.buildSubscribeMap(val);
 
         this.app.logger.info('已重载Subscribe');
     }

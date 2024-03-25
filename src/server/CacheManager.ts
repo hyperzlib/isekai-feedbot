@@ -11,6 +11,7 @@ export class CacheManager {
 
     private store!: Cache;
     private internalStore!: Cache;
+    private internalMemoryStore!: Cache;
 
     constructor(app: App, config: CacheConfig) {
         this.app = app;
@@ -26,15 +27,21 @@ export class CacheManager {
                 },
                 password: this.config.redis?.password,
                 db: this.config.redis?.db ?? 0,
+            };
+            let cacheOptionWithTTL = {
+                ...cacheOption,
                 ttl: (this.config.ttl ?? 600) * 1000
             };
+
             this.app.logger.debug('Redis Store 配置: ' + JSON.stringify(cacheOption));
-            this.store = await caching(await redisStore(cacheOption));
+            this.internalStore = await caching(await redisStore(cacheOption));
+            this.store = await caching(await redisStore(cacheOptionWithTTL));
             this.app.logger.info(`使用Redis作为CacheStore`);
         } else {
             let cacheOption = {
                 ttl: (this.config.ttl ?? 600) * 1000
             };
+            this.internalStore = await caching('memory');
             this.store = await caching('memory', cacheOption);
             this.app.logger.info(`使用内存数据库作为CacheStore`);
         }
@@ -53,11 +60,13 @@ export class CacheManager {
 
     /**
      * 获取内部CacheStore
-     * @param path 
+     * @param path Cache 路径
+     * @param inMemory 使用内存缓存
      * @returns 
      */
-    public getInternalStore(path: string[]): CacheStore {
-        return new CacheStore(this.internalStore, path);
+    public getInternalStore(path: string[], inMemory: boolean = false): CacheStore {
+        let store = inMemory ? this.internalMemoryStore : this.internalStore;
+        return new CacheStore(store, ['sys', ...path]);
     }
 }
 

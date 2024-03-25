@@ -1,5 +1,5 @@
 import { Robot } from "#ibot/robot/Robot";
-import { LiteralUnion } from "#ibot/utils/types";
+import { LiteralUnion } from "#ibot/types/misc";
 import { any } from "micromatch";
 
 export type BaseSenderType = "user" | "group" | "channel";

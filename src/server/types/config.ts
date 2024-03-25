@@ -8,8 +8,7 @@ export type Config = {
 
     channel_config_path: string;
     subscribe_config: string;
-    role_config: string;
-    user_role_binding_config: string;
+    role_config_path: string;
 
     debug: boolean;
     robot: Record<string, RobotConfig>;

@@ -4,21 +4,27 @@ import { RestfulApiConfig } from "./types/config";
 import Router from "koa-router";
 import { makeRoutes } from "./restful/routes";
 import { koaBody } from "koa-body";
+import KoaWebsocket from "koa-websocket";
+import * as ws from "ws";
 
 export interface RestfulContext {
-    feedbot: App,
+    websocket: ws;
+    path: string;
+    botContext: App,
     request: Koa.Request,
 }
 
 export type FullRestfulContext = RestfulContext & Koa.BaseContext;
 export type RestfulRouter = Router<any, RestfulContext>;
+export type RestfulWsRouter = Router<any, RestfulContext> & KoaWebsocket.App;
 
 export class RestfulApiManager {
     private app: App;
     private config: RestfulApiConfig;
     
-    public koa: Koa;
+    public koa: KoaWebsocket.App;
     public router: RestfulRouter;
+    public wsRouter: RestfulWsRouter;
 
     constructor(app: App, config: Pick<RestfulApiConfig, any>) {
         this.app = app;
@@ -29,8 +35,9 @@ export class RestfulApiManager {
             ...config
         } as any;
 
-        this.koa = new Koa();
+        this.koa = KoaWebsocket(new Koa());
         this.router = new Router<any, RestfulContext>();
+        this.wsRouter = new Router<any, RestfulContext>() as any;
     }
 
     public initialize(): Promise<void> {
@@ -45,6 +52,7 @@ export class RestfulApiManager {
 
         return new Promise((resolve) => {
             this.koa.use(this.router.routes());
+            this.koa.ws.use(this.wsRouter.routes() as any);
             this.koa.listen(this.config.port, () => {
                 this.app.logger.info(`Restful API 启动于：http://${this.config.host}:${this.config.port}`);
                 resolve();
@@ -58,7 +66,7 @@ export class RestfulApiManager {
      * @param next 
      */
     public globalMiddleware = async (ctx: FullRestfulContext, next: () => Promise<any>) => {
-        ctx.feedbot = this.app; // 注入全局app
+        ctx.botContext = this.app; // 注入全局app
         await next();
     }
 
@@ -144,7 +152,10 @@ export class RestfulApiManager {
         return false;
     }
 
-    public getRobotRouter(robotId: string) {
-        return this.router.prefix('/' + robotId);
+    public getRobotRouter(robotId: string): [RestfulRouter, RestfulWsRouter] {
+        return [
+            this.router.prefix('/' + robotId),
+            this.wsRouter.prefix('/' + robotId) as RestfulWsRouter,
+        ];
     }
 }

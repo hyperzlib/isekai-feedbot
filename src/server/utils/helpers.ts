@@ -1,3 +1,4 @@
+import { ChatIdentity } from '#ibot/message/Sender';
 import * as fs from 'fs';
 
 export function compareProps(a: any, b: any, props: string[], depth: number = 5): boolean {
@@ -172,4 +173,28 @@ export function unescapeHtml(text: string) {
 
 export function escapeMarkdown(text: string) {
     return text.replace(/([\\`*_{}[\]()#+\-.!])/g, '\\$1');
+}
+
+export function chatIdentityToString(chatIdentity: ChatIdentity) {
+    if (chatIdentity.userId && chatIdentity.groupId && chatIdentity.rootGroupId) {
+        return `${chatIdentity.robot.robotId}:${chatIdentity.userId}@${chatIdentity.rootGroupId}:${chatIdentity.groupId}`;
+    } else if (chatIdentity.userId && chatIdentity.groupId) {
+        return `${chatIdentity.robot.robotId}:${chatIdentity.userId}@${chatIdentity.groupId}`;
+    } else if (chatIdentity.userId) {
+        return `${chatIdentity.robot.robotId}:${chatIdentity.userId}`;
+    }
+
+    return '';
+}
+
+export function chatIdentityToCacheKey(chatIdentity: ChatIdentity) {
+    if (chatIdentity.userId && chatIdentity.groupId && chatIdentity.rootGroupId) {
+        return `${chatIdentity.robot.robotId}:${chatIdentity.userId}:${chatIdentity.rootGroupId}:${chatIdentity.groupId}`;
+    } else if (chatIdentity.userId && chatIdentity.groupId) {
+        return `${chatIdentity.robot.robotId}:${chatIdentity.userId}:${chatIdentity.groupId}`;
+    } else if (chatIdentity.userId) {
+        return `${chatIdentity.robot.robotId}:${chatIdentity.userId}`;
+    }
+
+    return '';
 }

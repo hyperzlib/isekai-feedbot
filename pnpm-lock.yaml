@@ -37,6 +37,9 @@ dependencies:
   koa-router:
     specifier: ^10.1.1
     version: 10.1.1
+  koa-websocket:
+    specifier: ^7.0.0
+    version: 7.0.0
   lua-runner:
     specifier: ^2.0.3
     version: 2.0.3
@@ -73,6 +76,9 @@ dependencies:
   winston:
     specifier: ^3.8.2
     version: 3.9.0
+  ws:
+    specifier: ^8.16.0
+    version: 8.16.0
   yaml:
     specifier: ^1.8.3
     version: 1.10.2
@@ -84,6 +90,9 @@ devDependencies:
   '@types/koa-router':
     specifier: ^7.4.4
     version: 7.4.4
+  '@types/koa-websocket':
+    specifier: ^5.0.10
+    version: 5.0.10
   '@types/micromatch':
     specifier: ^4.0.2
     version: 4.0.2
@@ -96,6 +105,9 @@ devDependencies:
   '@types/throttle-debounce':
     specifier: ^2.1.0
     version: 2.1.0
+  '@types/ws':
+    specifier: ^8.5.10
+    version: 8.5.10
   '@types/yaml':
     specifier: ^1.9.7
     version: 1.9.7
@@ -284,6 +296,14 @@ packages:
       '@types/koa': 2.13.6
     dev: true
 
+  /@types/koa-websocket@5.0.10:
+    resolution: {integrity: sha512-yaqbFuyrw4eFchCHdOiyF1uhSe0nRv6xFAvVlxoG8Fq2/h+0IDjka3DyN2hJt29m6jr3+nlgsPTGh/Hd/tZmIg==}
+    dependencies:
+      '@types/koa': 2.13.6
+      '@types/koa-compose': 3.2.5
+      '@types/ws': 8.5.10
+    dev: true
+
   /@types/koa@2.13.6:
     resolution: {integrity: sha512-diYUfp/GqfWBAiwxHtYJ/FQYIXhlEhlyaU7lB/bWQrx4Il9lCET5UwpFy3StOAohfsxxvEQ11qIJgT1j2tfBvw==}
     dependencies:
@@ -371,6 +391,12 @@ packages:
       '@types/node': 17.0.45
       '@types/webidl-conversions': 7.0.0
     dev: false
+
+  /@types/ws@8.5.10:
+    resolution: {integrity: sha512-vmQSUcfalpIq0R9q7uTo2lXs6eGIpt9wtnLdMv9LVpIjCA/+ufZRozlVoVelIYixx1ugCBKDhn89vnsEGOCx9A==}
+    dependencies:
+      '@types/node': 17.0.45
+    dev: true
 
   /@types/yaml@1.9.7:
     resolution: {integrity: sha512-8WMXRDD1D+wCohjfslHDgICd2JtMATZU8CkhH8LVJqcJs6dyYj5TGptzP8wApbmEullGBSsCEzzap73DQ1HJaA==}
@@ -1659,6 +1685,19 @@ packages:
       - supports-color
     dev: false
 
+  /koa-websocket@7.0.0:
+    resolution: {integrity: sha512-MsHUFKqA4+j+0dpPKWtsvZfnpQ1NcgF+AaTZQZ4B3Xj/cWK31qqmKx9HnA5Gw1LV2aIDzqwy0IDBsZYRurTUAg==}
+    dependencies:
+      co: 4.6.0
+      debug: 4.3.4
+      koa-compose: 4.1.0
+      ws: 8.16.0
+    transitivePeerDependencies:
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+    dev: false
+
   /koa@2.14.2:
     resolution: {integrity: sha512-VFI2bpJaodz6P7x2uyLiX6RLYpZmOJqNmoCst/Yyd7hQlszyPwG/I9CQJ63nOtKSxpt5M7NH67V6nJL2BwCl7g==}
     engines: {node: ^4.8.4 || ^6.10.1 || ^7.10.1 || >= 8.1.4}
@@ -2925,6 +2964,19 @@ packages:
 
   /wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
+    dev: false
+
+  /ws@8.16.0:
+    resolution: {integrity: sha512-HS0c//TP7Ina87TfiPUz1rQzMhHrl/SG2guqRcTOIUYD2q8uhUdNHZYJUaQ8aTGPzCh+c6oawMKW35nFl1dxyQ==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
     dev: false
 
   /yallist@3.1.1:

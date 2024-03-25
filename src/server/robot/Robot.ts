@@ -2,7 +2,7 @@ import { Reactive, reactive } from "#ibot/utils/reactive";
 import App from "../App";
 import { CacheStore } from "../CacheManager";
 import { CommandInfo } from "../PluginManager";
-import { RestfulRouter } from "../RestfulApiManager";
+import { RestfulRouter, RestfulWsRouter } from "../RestfulApiManager";
 import { CommonReceivedMessage, CommonSendMessage, MessageChunk, CommonMessage, MessageDirection } from "../message/Message";
 import { ChatIdentity, UserInfoType, GroupInfoType, RootGroupInfoType, ChannelInfoType, GroupUserInfoType, UserSender, BaseSender, GroupSender } from "../message/Sender";
 import { MessageDataType, MessageSchemaType } from "../odm/Message";
@@ -43,6 +43,7 @@ export class Robot<Adapter extends RobotAdapter = any> {
     public adapter: Adapter;
     public storages?: RobotStorage;
     public restfulRouter!: RestfulRouter;
+    public restfulWsRouter!: RestfulWsRouter;
 
     private app: App;
 
@@ -57,7 +58,7 @@ export class Robot<Adapter extends RobotAdapter = any> {
 
     async initialize() {
         // Restful API
-        this.restfulRouter = this.app.restfulApi.getRobotRouter(this.robotId);
+        [this.restfulRouter, this.restfulWsRouter] = this.app.restfulApi.getRobotRouter(this.robotId);
 
         // Storages
         this.storages = await this.app.storage.getStorages(this.robotId);

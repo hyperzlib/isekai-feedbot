@@ -1,9 +1,10 @@
 import koa from "koa";
-import got from "got/dist/source";
+import got, { TimeoutError } from "got/dist/source";
+import * as ws from "ws";
 
 import App from "../../App";
 import { Robot, RobotAdapter } from "../Robot";
-import { FullRestfulContext, RestfulRouter } from "../../RestfulApiManager";
+import { FullRestfulContext, RestfulRouter, RestfulWsRouter } from "../../RestfulApiManager";
 import { convertMessageToQQChunk, parseQQMessageChunk, QQAttachmentMessage, QQGroupMessage, QQGroupSender, QQPrivateMessage, QQUserSender } from "./qq/Message";
 import { CommonReceivedMessage, CommonSendMessage, MessageChunk } from "../../message/Message";
 import { RobotConfig } from "../../types/config";
@@ -12,10 +13,11 @@ import { QQInfoProvider } from "./qq/InfoProvider";
 import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
 import { PluginController } from "#ibot-api/PluginController";
 import { asleep } from "#ibot/utils";
+import { randomUUID } from "crypto";
 
 export type QQRobotConfig = RobotConfig & {
     userId: string;
-    host: string;
+    host?: string;
     command_prefix?: string;
 }
 
@@ -25,6 +27,16 @@ export type QQGroupInfo = {
     memberCount?: number,
     memberLimit?: number
 };
+
+export type QueryQueueItem = {
+    method: string,
+    data: any,
+    resolve: (value: any) => void,
+    reject: (reason?: any) => void,
+    time: number,
+    queryId: string;
+    retryTimes: number;
+}
 
 export default class QQRobot implements RobotAdapter {
     public type = 'qq';
@@ -39,7 +51,13 @@ export default class QQRobot implements RobotAdapter {
 
     private app: App;
     private wrapper!: Robot<QQRobot>;
-    private endpoint: string;
+    private endpoint?: string;
+
+    private botSocket?: ws;
+    private socketQueryQueue: QueryQueueItem[] = [];
+    private socketResponseQueue: Record<string, QueryQueueItem> = {};
+    private socketQueueRunning: boolean = false;
+    private socketQueueCleanerTaskId?: NodeJS.Timer;
 
     private taskId?: NodeJS.Timer;
 
@@ -50,7 +68,9 @@ export default class QQRobot implements RobotAdapter {
         this.app = app;
         this.robotId = robotId;
         this.config = config;
-        this.endpoint = 'http://' + config.host;
+        if (config.host) {
+            this.endpoint = 'http://' + config.host;
+        }
         this.userId = config.userId.toString();
 
         this.description = config.description ?? this.app.config.robot_description ?? 'Isekai Feedbot for QQ';
@@ -72,15 +92,23 @@ export default class QQRobot implements RobotAdapter {
 
         this.wrapper.account = this.userId;
 
-        await this.initRestfulApi(this.wrapper.restfulRouter);
+        await this.initRestfulApi(this.wrapper.restfulRouter, this.wrapper.restfulWsRouter);
         await this.infoProvider.initialize();
+
+        this.socketQueueCleanerTaskId = setInterval(() => {
+            this.cleanSocketQueryQueue();
+        }, 1000);
     }
 
     async destroy() {
+        if (this.socketQueueCleanerTaskId) {
+            clearInterval(this.socketQueueCleanerTaskId);
+        }
+
         await this.infoProvider.destroy();
     }
 
-    async initRestfulApi(router: RestfulRouter) {
+    async initRestfulApi(router: RestfulRouter, wsRouter: RestfulWsRouter) {
         router.get('/event', (ctx: FullRestfulContext, next: koa.Next) => {
             ctx.body = JSON.stringify({
                 status: 0,
@@ -89,6 +117,58 @@ export default class QQRobot implements RobotAdapter {
             next();
         });
         router.post(`/event`, this.handlePostEvent.bind(this));
+
+        wsRouter.all('/ws', (ctx: FullRestfulContext, next: koa.Next) => {
+            ctx.websocket.on('message', (messageBuffer: Buffer) => {
+                try {
+                    let message = JSON.parse(messageBuffer.toString('utf-8'));
+                    
+                    if (message.post_type === 'meta_event') {
+                        if (message.meta_event_type === 'heartbeat') {
+                            ctx.websocket.send(JSON.stringify({
+                                ping: true,
+                            }));
+                        } else if (message.meta_event_type === 'lifecycle' && message.sub_type === 'connect') {
+                            if (message.status?.self?.user_id && message.status.self.user_id !== parseInt(this.userId)) {
+                                return;
+                            }
+                            this.botSocket = ctx.websocket;
+
+                            // 开始处理队列
+                            this.startSocketQueryQueue();
+                        }
+                    } else if (message.echo) {
+                        // 处理返回消息
+                        if (message.echo in this.socketResponseQueue) {
+                            this.socketResponseQueue[message.echo].resolve(message);
+                            delete this.socketResponseQueue[message.echo];
+                        }
+                    } else {
+                        // if (this.app.debug && message.post_type !== "meta_event" && message.meta_event_type !== "heartbeat") {
+                        //     console.log("收到QQ机器人事件", message);
+                        // }
+                        switch (message.post_type) {
+                            case 'message':
+                                this.handleMessage(message);
+                                break;
+                            case 'notice':
+                                switch (message.notice_type) {
+                                    case 'group_upload':
+                                        this.handleGroupFile(message);
+                                        break;
+                                }
+                                break;
+                        }
+                    }
+                } catch (err: any) {
+                    this.app.logger.error('[QQRobot] Websocket Message Error ', err.message);
+                    console.error(err);
+                }
+            });
+            ctx.websocket.on('close', () => {
+                
+            });
+        });
     }
 
     async handlePostEvent(ctx: FullRestfulContext, next: koa.Next) {
@@ -453,9 +533,100 @@ export default class QQRobot implements RobotAdapter {
      * 执行API调用
      */
     callRobotApi(method: string, data: any): Promise<any> {
-        return got.post(this.endpoint + '/' + method, {
-            json: data,
-            timeout: 10000
-        }).json<any>();
+        if (this.endpoint) {
+            return got.post(this.endpoint + '/' + method, {
+                json: data,
+                timeout: 10000
+            }).json<any>();
+        } else {
+            return this.doSocketQuery(method, data);
+        }
+    }
+
+    async doSocketQuery(method: string, data: any): Promise<any> {
+        return new Promise((resolve, reject) => {
+            let queryId = randomUUID();
+            this.socketQueryQueue.push({
+                method,
+                data,
+                resolve,
+                reject,
+                queryId,
+                time: Date.now(),
+                retryTimes: 0,
+            });
+
+            this.startSocketQueryQueue();
+        });
+    }
+
+    async startSocketQueryQueue() {
+        if (this.socketQueueRunning) return;
+
+        this.socketQueueRunning = true;
+
+        while (this.botSocket && this.botSocket.readyState === this.botSocket.OPEN &&
+                this.socketQueryQueue.length > 0) {
+            try {
+                let query = this.socketQueryQueue.shift();
+                if (query) {
+                    try {
+                        let wsData = {
+                            action: query.method,
+                            echo: query.queryId,
+                            params: query.data,
+                        }
+                        
+                        await new Promise<void>((resolve, reject) => {
+                            this.botSocket!.send(JSON.stringify(wsData), (err) => {
+                                if (err) {
+                                    reject(err);
+                                }
+                                resolve();
+                            });
+                        });
+
+                        query.time = Date.now();
+                        this.socketResponseQueue[query.queryId] = query;
+
+                        if (['send_private_msg', 'send_group_msg', 'send_msg'].includes(query.data.action)) {
+                            // 如果有发送消息的请求，等待一段时间再继续
+                            await asleep(500);
+                        }
+                    } catch(err) {
+                        if (query.retryTimes < 3) {
+                            query.retryTimes++;
+                            this.socketQueryQueue.unshift(query);
+                        } else {
+                            query.reject(err);
+                        }
+                    }
+                }
+            } catch(err: any) {
+                this.app.logger.error('[QQRobot] Socket Query Error ', err.message);
+                console.log(err);
+            }
+        }
+
+        this.socketQueueRunning = false;
+    }
+
+    cleanSocketQueryQueue() {
+        let currentTime = Date.now();
+        this.socketQueryQueue = this.socketQueryQueue.filter((item) => {
+            if (currentTime - item.time > 30000) {
+                item.reject(new Error('Socket Query Timeout'));
+                return false;
+            }
+            return true;
+        });
+
+        for (let key in this.socketResponseQueue) {
+            let item = this.socketResponseQueue[key];
+            if (currentTime - item.time > 30000) {
+                item.reject(new Error('Socket Query Timeout'));
+                delete this.socketResponseQueue[key];
+            }
+        }
     }
 }

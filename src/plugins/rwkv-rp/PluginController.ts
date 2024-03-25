@@ -29,6 +29,18 @@ export type ChatCompleteApiConfig = {
     endpoint: string,
 } & Record<string, any>;
 
+export type FunctionCallingExtras = {
+    apiConf: ChatCompleteApiConfig,
+    characterConf: CharacterConfig,
+    apiUserName: string,
+    userToken: string,
+}
+
+export type FunctionCallingResponse = {
+    result_message?: string,
+    result_prompt?: string,
+};
+
 export class RWKVAPIError extends Error {
     public code: string;
 
@@ -102,12 +114,16 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
     private SESSION_KEY_API_CHAT_CHARACTER = 'rwkv_rp_apiChatCharacter';
     private SESSION_KEY_API_RESET_LOCK = 'rwkv_rp_apiResetLock';
     private SESSION_KEY_USER_TOKEN = 'rwkv_rp_userToken';
+    private SESSION_KEY_BAN_USER = 'rwkv_rp_banUser';
     private CHARACTER_EXPIRE = 86400;
+    private BAN_EXPIRE = 600;
 
     private globalDefaultCharacter: string = '';
 
     private chatGenerating = false;
     private messageGroup: Record<string, RandomMessage> = {};
+
+    public llmFunctions: Record<string, CallableFunction> = {};
 
     async getDefaultConfig() {
         return defaultConfig;
@@ -155,6 +171,9 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
         }, {
             priority: MessagePriority.LOW
         });
+
+        // 内置LLM函数
+        this.llmFunctions.ban_user = this.funcBanUser.bind(this);
     }
 
     getJWTPayload(jwtToken: string) {
@@ -174,6 +193,18 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
 
         // 全局默认用户
         this.globalDefaultCharacter = this.config.default_characters.find((data) => !data.robot && !data.group)?.id ?? '';
+    }
+
+    private async funcBanUser(params: any, message: CommonReceivedMessage, result_message: string, extras: FunctionCallingExtras) {
+        this.logger.info(`RWKV 模型已提出封禁用户：${message.sender.userId}`)
+        await message.session.user.set(this.SESSION_KEY_BAN_USER, '1', this.BAN_EXPIRE);
+        // 同时重置人格
+        try {
+            await this.apiChatReset(extras.userToken, extras.apiConf, extras.characterConf);
+        } catch (err: any) {
+            this.app.logger.error('RWKV Reset character error', err);
+            console.error(err);
+        }
     }
 
     private getDefaultCharacter(message: CommonReceivedMessage): string {
@@ -324,7 +355,7 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
             json: {
                 character_name: characterConf.rwkv_character,
             },
-            timeout: 30000,
+            timeout: 60000,
             headers: {
                 Authorization: `Bearer ${userToken}`,
             }
@@ -348,7 +379,7 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
         }
     }
 
-    private async apiChatComplete(userName: string, userToken: string, question: string, apiConf: ChatCompleteApiConfig,
+    private async apiChatComplete(userName: string, userToken: string, nickName: string, question: string, apiConf: ChatCompleteApiConfig,
         characterConf: CharacterConfig, receivedMessage: CommonReceivedMessage, tryLogin = true): Promise<string> {
         let modelOpts = Object.fromEntries(Object.entries({
             min_len: apiConf.model_options.min_len,
@@ -362,9 +393,10 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
             json: {
                 ...modelOpts,
                 character_name: characterConf.rwkv_character,
+                chat_user_name: nickName,
                 prompt: question,
             },
-            timeout: 30000,
+            timeout: 60000,
             headers: {
                 Authorization: `Bearer ${userToken}`,
             }
@@ -386,7 +418,7 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
                     case 401:
                         if (tryLogin) {
                             await this.userLogin(userName, apiConf, receivedMessage);
-                            return await this.apiChatComplete(userName, userToken, question, apiConf, characterConf, receivedMessage, false);
+                            return await this.apiChatComplete(userName, userToken, nickName, question, apiConf, characterConf, receivedMessage, false);
                         }
                         break;
                     default:
@@ -410,6 +442,12 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
         if (singleMessage && this.chatGenerating) {
             let msg = this.messageGroup.generating.nextMessage();
             await message.sendReply(msg ?? '正在生成中，请稍后再试', true);
+            return;
+        }
+
+        // 检测用户是否被ban
+        if (await message.session.user.get<string>(this.SESSION_KEY_BAN_USER)) {
+            await message.sendReply('哼', true);
             return;
         }
 
@@ -458,7 +496,7 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
                 this.chatGenerating = true;
             }
 
-            const questionTokens = await gptEncode(content).length;
+            const questionTokens = gptEncode(content).length;
             this.app.logger.debug(`提问占用Tokens：${questionTokens}`);
 
             if (questionTokens > apiConf.max_input_tokens) {
@@ -484,14 +522,64 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
             }
             await userSessionStore.set(this.SESSION_KEY_API_RESET_LOCK, '1', this.CHARACTER_EXPIRE);
 
-            let replyRes = await this.apiChatComplete(apiUserName, userToken, content, apiConf, characterConf, message);
-            if (this.app.debug) {
-                console.log(replyRes);
+            let userNickName = message.sender.displayName ?? '用户';
+
+            let replyRes: string | null = null;
+            let funcCallExtras: FunctionCallingExtras = {
+                characterConf,
+                apiConf,
+                apiUserName,
+                userToken,
+            };
+            for (let i = 0; i < 3; i ++) {
+                // 处理function calling
+                replyRes = await this.apiChatComplete(apiUserName, userToken, userNickName,
+                    content, apiConf, characterConf, message);
+                if (this.app.debug) {
+                    console.log(replyRes);
+                }
+
+                if (!replyRes) {
+                    break;
+                }
+
+                let funcCallStr = replyRes.match(/````(\{.*?\})````/);
+                let funcCallResult: FunctionCallingResponse | null = null;
+                if (funcCallStr) {
+                    this.logger.debug(`处理 RWKV 函数调用：${funcCallStr[1]}`)
+                    let funcParams: any = {};
+                    try {
+                        funcParams = JSON.parse(funcCallStr[1]);
+                    } catch(e) {
+                        this.logger.warn('RWKV function calling parse error', e);
+                        break;
+                    }
+                    if (funcParams.call) {
+                        let funcName = funcParams.call;
+                        if (funcName in this.llmFunctions) {
+                            const func = this.llmFunctions[funcName];
+                            funcCallResult = await func(funcParams, message, replyRes, funcCallExtras);
+                        } else {
+                            funcCallResult = {
+                                result_message: '抱歉，此功能暂不可用'
+                            };
+                        }
+                    }
+                }
+
+                if (!funcCallResult || !funcCallResult.result_prompt) {
+                    // 如果没有返回结果，或者返回结果为空，则停止继续生成
+                    let funcCallStrReplace = funcCallResult?.result_message ?? '';
+                    replyRes = replyRes.replace(/````(\{.*?\})````/g, funcCallStrReplace);
+                    break;
+                }
             }
 
-            let sentMessage = await message.sendReply(replyRes, true, {
-                isRWKVReply: true
-            });
+            if (replyRes) {
+                let sentMessage = await message.sendReply(replyRes, true, {
+                    isRWKVReply: true
+                });
+            }
         } catch (err: any) {
             this.app.logger.error('RWKV error', err);
             console.error(err);
