@@ -5,14 +5,32 @@ import { CommandInfo, PluginEvent } from "#ibot/PluginManager";
 
 export default class SystemController extends PluginController {
     async initialize() {
-        this.event.registerCommand({
-            command: '帮助',
-            name: '获取帮助',
-            alias: ['help', '?', '？'],
-        }, (args, message, resolved) => {
-            resolved();
+        // 基础指令
+        this.useScope('common', (event) => {
+            event.registerCommand({
+                command: '帮助',
+                name: '获取帮助',
+                alias: ['help', '?', '？'],
+            }, (args, message, resolved) => {
+                resolved();
+    
+                this.handleHelp(args.param, message);
+            });
+        });
 
-            this.handleHelp(args.param, message);
+        this.useScope('manage', (event) => {
+            event.registerCommand({
+                command: '测试权限',
+                name: '测试权限',
+            }, (args, message, resolved) => {
+                resolved();
+
+                message.sendReply('权限测试通过');
+            });
+        });
+
+        this.useScope('admin', (event) => {
+
         });
     }
 

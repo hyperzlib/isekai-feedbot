@@ -21,7 +21,7 @@ export class UserSender implements BaseSender {
     public userName?: string;
     public nickName?: string;
 
-    public accessGroup: string[] = [];
+    public roles: string[] = [];
 
     constructor(robot: Robot, userId: string) {
         this.robot = robot;
@@ -37,6 +37,7 @@ export class UserSender implements BaseSender {
             type: 'private',
             robot: this.robot,
             userId: this.userId,
+            userRoles: this.roles,
         };
 
         return chatIdentity;
@@ -67,6 +68,8 @@ export class GroupSender {
     public globalNickName?: string;
     public nickName?: string;
 
+    public roles: string[] = [];
+
     constructor(robot: Robot, groupId: string, userId: string) {
         this.robot = robot;
         this.groupId = groupId;
@@ -79,6 +82,7 @@ export class GroupSender {
             robot: this.robot,
             groupId: this.groupId,
             userId: this.userId,
+            userRoles: this.roles,
         };
 
         if (this.rootGroupId) {
@@ -116,6 +120,7 @@ export interface ChatIdentity {
     groupId?: string;
     userId?: string;
     channelId?: string;
+    userRoles?: string[];
 }
 
 export interface UserInfoType {
@@ -123,6 +128,7 @@ export interface UserInfoType {
     userName?: string;
     nickName?: string;
     image?: string;
+    roles?: string[];
     extra: any;
 }
 
@@ -148,7 +154,7 @@ export interface GroupUserInfoType {
     userName?: string;
     nickName?: string;
     title?: string;
-    role?: string;
+    roles?: string[];
     image?: string;
     extra: any;
 }

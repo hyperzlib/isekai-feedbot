@@ -243,7 +243,7 @@ export class QQInfoProvider {
             userName: groupSender.userName,
             nickName: groupSender.nickName || groupSender.globalNickName,
             title: groupSender.title,
-            role: groupSender.role,
+            roles: groupSender.roles,
             image: this.getUserImage(groupSender.userId),
             extra: {},
         };

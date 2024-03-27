@@ -17,6 +17,7 @@ import { DatabaseManager } from './DatabaseManager';
 import { Logger } from './utils/Logger';
 import { PluginController } from '#ibot-api/PluginController';
 import * as Utils from './utils';
+import { RoleManager } from './RoleManager';
 
 export * from './utils/contextHooks';
 
@@ -35,6 +36,7 @@ export default class App {
     public storage!: StorageManager;
     public database?: DatabaseManager;
     public robot!: RobotManager;
+    public role!: RoleManager;
     public subscribe!: SubscribeManager;
     public plugin!: PluginManager;
     public restfulApi!: RestfulApiManager;
@@ -58,6 +60,7 @@ export default class App {
         await this.initStorageManager();
         await this.initDatabaseManager();
         await this.initRobot();
+        await this.initRoleManager();
         await this.initSubscribeManager();
         await this.initPluginManager();
 
@@ -137,6 +140,11 @@ export default class App {
     private async initRobot() {
         this.robot = new RobotManager(this, this.config.robot);
         await this.robot.initialize();
+    }
+
+    private async initRoleManager() {
+        this.role = new RoleManager(this);
+        await this.role.initialize();
     }
 
     private async initSubscribeManager() {

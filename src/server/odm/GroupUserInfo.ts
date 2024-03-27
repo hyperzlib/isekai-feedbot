@@ -26,7 +26,7 @@ export const GroupUserInfoSchema = (robotId: string) => new Schema<GroupUserInfo
     },
     nickName: String,
     title: String,
-    role: String,
+    roles: [String],
     image: String,
     extra: {
         type: Object,

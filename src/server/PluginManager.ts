@@ -123,6 +123,8 @@ export class PluginManager extends EventEmitter {
             await this.loadPlugin(pluginPath);
         }
 
+        await this.app.role.onPluginLoaded();
+
         this.configWatcher = chokidar.watch(path.join(this.configPath, '**/*.yaml'), {
             ignorePermissionErrors: true,
             persistent: true
@@ -188,6 +190,9 @@ export class PluginManager extends EventEmitter {
                 if (isReload) {
                     this.app.logger.info(`已重新加载插件: ${pluginId}`);
                     this.emit('pluginReloaded', controllerInstance);
+                    
+                    // 重新加载权限
+                    await this.app.role.onPluginLoaded();
                 } else {
                     this.app.logger.info(`已加载插件: ${pluginId}`);
                     this.emit('pluginLoaded', controllerInstance);
@@ -393,6 +398,10 @@ export class PluginManager extends EventEmitter {
     }
 }
 
+export type ScopeOptions = {
+    defaultGroup?: string,
+}
+
 export class EventScope {
     protected app: App;
     protected eventManager: EventManager;
@@ -404,12 +413,15 @@ export class EventScope {
     public eventList: Record<string, EventListenerInfo[]> = {};
     public eventSorted: Record<string, boolean> = {};
 
-    constructor(app: App, pluginId: string, scopeName: string) {
+    constructor(app: App, pluginId: string, scopeName: string, scopeOptions: ScopeOptions = {}) {
         this.app = app;
         this.eventManager = app.event;
 
         this.pluginId = pluginId;
         this.scopeName = scopeName;
+
+        // 添加权限
+        this.app.role.addBaseRule(`${pluginId}/${scopeName}`, scopeOptions.defaultGroup);
     }
 
     /**

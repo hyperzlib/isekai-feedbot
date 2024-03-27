@@ -1,5 +1,5 @@
 import App from "#ibot/App";
-import { PluginEvent, PluginInstance } from "#ibot/PluginManager";
+import { PluginEvent, PluginInstance, ScopeOptions } from "#ibot/PluginManager";
 import { CommonMessage } from "#ibot/message/Message";
 import { PluginApiBridge } from "#ibot/plugin/PluginApiBridge";
 import { Logger } from "#ibot/utils/Logger";
@@ -68,7 +68,7 @@ export class PluginController<ConfigType = Record<string, string>> {
     }
     public async setConfig(config: any): Promise<void> { }
 
-    public useScope(scopeName: string, callback: (event: PluginEvent) => void) {
-        this._bridge.useScope(scopeName, callback);
+    public useScope(scopeName: string, callback: (event: PluginEvent) => void, scopeOptions?: ScopeOptions) {
+        this._bridge.useScope(scopeName, callback, scopeOptions);
     }
 }

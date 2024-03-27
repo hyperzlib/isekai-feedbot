@@ -20,6 +20,7 @@ export const UserInfoSchema = (robotId: string) => new Schema<UserInfoSchemaType
         index: true,
     },
     image: String,
+    roles: [String],
     extra: {
         type: Object,
         default: {},

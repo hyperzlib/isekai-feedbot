@@ -8,6 +8,7 @@ export function chatIdentityToDB(chatIdentity: ChatIdentity): ChatIdentityEntity
         groupId: chatIdentity.groupId,
         userId: chatIdentity.userId,
         channelId: chatIdentity.channelId,
+        userRoles: chatIdentity.userRoles,
     }
 }
 
@@ -16,6 +17,7 @@ export type ChatIdentityEntityType = Partial<{
     groupId: string,
     userId: string,
     channelId: string,
+    userRoles: string[],
 }>;
 
 export type MessageDataType = {

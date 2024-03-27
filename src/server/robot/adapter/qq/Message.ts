@@ -83,7 +83,6 @@ export class QQUserSender extends UserSender {
 }
 
 export class QQGroupSender extends GroupSender {
-    public role: "owner" | "admin" | "member" = 'member';
     public level?: string;
     public title?: string;
     public groupInfo?: QQGroupInfo;

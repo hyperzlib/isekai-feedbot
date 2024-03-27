@@ -24,6 +24,11 @@ export type ControllerCommandInfo = {
     eventScope: PluginEvent;
 }
 
+export type EventMeta = {
+    sender?: ChatIdentity;
+    userRules?: string[];
+}
+
 export class EventManager {
     private app: App;
 
@@ -143,7 +148,7 @@ export class EventManager {
         }
     }
 
-    public async emit(eventName: string, senderInfo?: ChatIdentity | null, ...args: any[]) {
+    public async emit(eventName: string, meta: EventMeta, ...args: any[]) {
         if (this.app.debug) {
             if (typeof args[0] === 'object' && args[0].chatType) {
                 this.app.logger.debug(`触发事件 ${eventName} ${args[0].contentText}`);
@@ -156,6 +161,7 @@ export class EventManager {
         if (!eventList) return false;
 
         const isFilter = eventName.startsWith('filter/');
+        const isCommand = eventName.startsWith('command/');
 
         let isResolved = false;
 
@@ -172,25 +178,25 @@ export class EventManager {
                     const msg: CommonReceivedMessage = arg;
                     if (error instanceof RateLimitError) {
                         const retryAfterMinutes = Math.ceil(error.retryAfter / 60);
-                        msg.sendReply(`使用太多了，${retryAfterMinutes}分钟后再试吧`);
+                        msg.sendReply(`使用太多了，${retryAfterMinutes} 分钟后再试吧`);
                     } else if (error instanceof PermissionDeniedError) {
-                        msg.sendReply(`使用此功能需要${error.requiredPermission}权限`);
+                        msg.sendReply(`使用此功能需要 ${error.requiredPermission} 权限`);
                     }
                     break;
                 }
             }
         }
 
-        let subscribedPlugins = this.getPluginSubscribe(senderInfo);
+        let subscribedPlugins = this.getPluginSubscribe(meta.sender);
 
         for (let eventInfo of eventList) {
-            if (!isFilter && senderInfo) {
-                switch (senderInfo.type) {
+            if (!isFilter && meta.sender) {
+                switch (meta.sender.type) {
                     case 'private':
                         if (!eventInfo.eventScope.allowPrivate) {
                             continue;
                         }
-                        if (!eventInfo.eventScope.isAllowSubscribe(senderInfo)) {
+                        if (!eventInfo.eventScope.isAllowSubscribe(meta.sender)) {
                             continue;
                         }
                         break;
@@ -207,10 +213,21 @@ export class EventManager {
                 }
 
                 const eventScope = eventInfo.eventScope;
+
+                // 检测用户是否有使用此控制器的权限
+                const ruleName = `${eventScope.pluginId}/${eventScope.scopeName}`;
+                if (meta.userRules && !meta.userRules.includes(ruleName)) {
+                    continue;
+                }
                 
                 // 检测控制器是否已禁用
                 if (!this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, subscribedPlugins)) {
-                    continue;
+                    if (isCommand) {
+                        // 如果是指令，则提示权限不足
+                        throw new PermissionDeniedError(ruleName);
+                    } else {
+                        continue;
+                    }
                 }
             }
 
@@ -234,20 +251,24 @@ export class EventManager {
     public async emitMessage(message: Reactive<CommonReceivedMessage>) {
         let isResolved = false;
 
+        const sender = this.getSenderInfo(message);
+        const userRules = await this.app.role.getUserRules(sender);
+
         if (message.chatType === 'private' || (message.chatType === 'group' && message.mentionedReceiver)) {
             if (this.app.config.focused_as_command) {
+                // 在开启@直接触发指令时，先检测当前消息是否是指令
                 isResolved = await this.emitCommand(message.contentText, message);
                 if (isResolved) return true;
             }
             
-            isResolved = await this.emit(`message/focused`, this.getSenderInfo(message), message);
+            isResolved = await this.emit(`message/focused`, { sender, userRules }, message);
             if (isResolved) return true;
         }
 
-        isResolved = await this.emit(`message/${message.chatType}`, this.getSenderInfo(message), message);
+        isResolved = await this.emit(`message/${message.chatType}`, { sender, userRules }, message);
         if (isResolved) return true;
 
-        isResolved = await this.emit('message', this.getSenderInfo(message), message);
+        isResolved = await this.emit('message', { sender, userRules }, message);
         if (isResolved) return true;
 
         return false;
@@ -293,22 +314,28 @@ export class EventManager {
             param
         };
 
-        return await this.emit(`command/${command}`, this.getSenderInfo(message), commandArgs, message);
+        const sender = this.getSenderInfo(message);
+        const userRules = await this.app.role.getUserRules(sender);
+
+        return await this.emit(`command/${command}`, { sender, userRules }, commandArgs, message);
     }
 
     public async emitRawEvent(robot: Robot, event: string, ...args: any[]) {
-        return await this.emit(`raw/${robot.type}/${event}`, { type: 'raw', robot: robot }, event);
+        return await this.emit(`raw/${robot.type}/${event}`, { sender: { type: 'raw', robot: robot } }, event);
     }
 
     public async emitRawMessage(message: Reactive<CommonReceivedMessage>) {
         let isResolved = false;
 
-        await this.emit(`filter/message`, null, message);
+        await this.emit(`filter/message`, {}, message);
 
-        isResolved = await this.emit(`raw/${message.receiver.type}/message`, this.getSenderInfo(message), message);
+        const sender = this.getSenderInfo(message);
+        const userRules = await this.app.role.getUserRules(sender);
+
+        isResolved = await this.emit(`raw/${message.receiver.type}/message`, { sender: sender, userRules }, message);
         if (isResolved) return true;
 
-        return await this.emit('raw/message', this.getSenderInfo(message), message);
+        return await this.emit('raw/message', { sender, userRules }, message);
     }
 
     public async emitFilterSendMessage(message: Reactive<CommonReceivedMessage>) {
@@ -320,14 +347,16 @@ export class EventManager {
             return {
                 type: 'private',
                 robot: message.receiver,
-                userId: message.sender.userId
+                userId: message.sender.userId,
+                userRoles: message.sender.userRoles ?? [],
             };
         } else if (message.chatType === 'group') {
             return {
                 type: 'group',
                 robot: message.receiver,
                 groupId: message.sender.groupId,
-                userId: message.sender.userId
+                userId: message.sender.userId,
+                userRoles: message.sender.userRoles ?? [],
             };
         }
 

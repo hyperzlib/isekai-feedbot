@@ -267,7 +267,7 @@ export default class QQRobot implements RobotAdapter {
                 groupSender.groupName = groupInfo?.groupName;
                 groupSender.globalNickName = postData.sender?.nickname;
                 groupSender.nickName = postData.sender?.card;
-                groupSender.role = postData.sender?.role ?? 'member';
+                groupSender.roles = [ postData.sender?.role ?? 'user' ];
                 groupSender.level = postData.sender?.level;
                 groupSender.title = postData.sender?.title;
 

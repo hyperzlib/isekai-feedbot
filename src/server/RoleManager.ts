@@ -1,10 +1,12 @@
 import * as path from "path";
+import Yaml from "yaml";
 
 import App from "./App";
 import { CacheStore } from "./CacheManager";
 import { ReactiveConfig } from "./utils/ReactiveConfig";
 import { ChatIdentity } from "./message/Sender";
 import { chatIdentityToCacheKey } from "./utils";
+import { writeFile } from "fs/promises";
 
 export type GroupConfig = {
     name: string,
@@ -18,22 +20,22 @@ export type UserGroupsConfig = {
     [robotId: string]: Record<string, string[]>,
 };
 
+const CACHE_EXPIRE = 86400;
+
 export class RoleManager {
     private app: App;
     private cache: CacheStore;
-
-    private rulesList: string[] = [];
-    private rulesIdMap: Record<string, number> = {};
-
-    private baseGroupRules: Record<string, number[]> = {};
-    private groupRules: Record<string, number[]> = {};
+    
+    private botRoleMap: Record<string, string> = {};
+    private baseGroupRules: Record<string, string[]> = {};
+    private groupRules: Record<string, string[]> = {};
     private groupsConfig!: ReactiveConfig<GroupsConfig>;
     private userGroupsConfig!: ReactiveConfig<UserGroupsConfig>;
 
     constructor(app: App) {
         this.app = app;
 
-        this.cache = this.app.cache.getInternalStore(['sys', 'roles'], false);
+        this.cache = this.app.cache.getStore(['sys', 'roles']);
     }
 
     public async initialize() {
@@ -41,40 +43,43 @@ export class RoleManager {
         this.groupsConfig = new ReactiveConfig<GroupsConfig>(path.join(this.app.config.role_config_path, "groups.yaml"), {});
         this.userGroupsConfig = new ReactiveConfig<UserGroupsConfig>(path.join(this.app.config.role_config_path, "user_groups.yaml"), {});
 
+        await this.cache.reset();
+
         await this.groupsConfig.load();
         await this.userGroupsConfig.load();
 
         this.groupsConfig.on('change', () => {
             this.cache.reset();
             this.makeGroupRulesMap();
+            this.app.logger.info('已重新加载用户组信息');
         });
 
         this.userGroupsConfig.on('change', () => {
             this.cache.reset();
+            this.app.logger.info('已重新加载用户对应用户组配置');
         });
+
+        this.userGroupsConfig.on('saved', () => {
+            this.app.logger.info('已保存用户对应用户组配置');
+        });
+
+        this.app.logger.info('已加载用户组信息');
+
+        this.app.logger.info('权限框架初始化成功');
     }
 
     /**
-     * 添加规则
+     * 添加默认规则（根据插件 scopes 生成）
      * @param rule 规则标识符 
      * @param defaultGroup 默认分配的分组
      */
-    public addRule(rule: string, defaultGroup?: string) {
-        // 添加到映射表
-        let ruleId: number = -1;
-        if (!this.rulesIdMap[rule]) {
-            ruleId = this.rulesList.push(rule) - 1;
-            this.rulesIdMap[rule] = ruleId;
-        } else {
-            ruleId = this.rulesIdMap[rule];
-        }
-
+    public addBaseRule(rule: string, defaultGroup?: string) {
         // 添加到默认规则
         if (defaultGroup === undefined) {
             if (rule.endsWith('/admin')) { // 将admin scope的默认分组设置为群管理
-                defaultGroup = 'groupAdmin';
+                defaultGroup = 'group_admin';
             } else if (rule.endsWith('/manage')) { // 将manage scope的默认分组设置为机器人管理
-                defaultGroup = 'botAdmin';
+                defaultGroup = 'bot_admin';
             } else { // 其他默认分组为user
                 defaultGroup = 'user';
             }
@@ -83,32 +88,32 @@ export class RoleManager {
         // defaultGroup为null时不分配默认分组
         if (defaultGroup) {
             this.baseGroupRules[defaultGroup] ??= [];
-            this.baseGroupRules[defaultGroup].push(ruleId);
+            this.baseGroupRules[defaultGroup].push(rule);
         }
     }
 
     /**
-     * 删除规则
-     * @param rule 规则标识符
+     * 删除默认规则
+     * @param rules 
      */
-    public removeRule(rule: string) {
-        let ruleId = this.rulesIdMap[rule];
-        if (ruleId !== undefined) {
-            // 不删除规则，只是将规则对应的分组置空，防止ruleId变化
-            this.rulesList[ruleId] = '';
-            delete this.rulesIdMap[rule];
+    public removeBaseRules(rules: string[]) {
+        for (let rule of rules) {
+            for (let groupName in this.baseGroupRules) {
+                this.baseGroupRules[groupName] = this.baseGroupRules[groupName].filter(r => r !== rule);
+            }
         }
     }
 
-    /**
-     * 清理规则
-     */
-    public purgeRules() {
-        this.rulesList = this.rulesList.filter(rule => rule !== '');
-        this.rulesIdMap = {};
-        this.rulesList.forEach((rule, index) => {
-            this.rulesIdMap[rule] = index;
-        });
+    public async saveBaseGroupRules() {
+        const filePath = path.join(this.app.config.role_config_path, "all_rules.yaml");
+        const content = Yaml.stringify(this.baseGroupRules);
+        await writeFile(filePath, content);
+        this.app.logger.info('已保存基础分组规则');
+    }
+
+    public async onPluginLoaded() {
+        await this.saveBaseGroupRules();
+        this.makeGroupRulesMap();
     }
 
     /**
@@ -117,7 +122,7 @@ export class RoleManager {
      * @param inheritStack 
      * @returns 
      */
-    private getOneGroupRules(groupName: string, inheritStack: string[] = []): number[] {
+    private getOneGroupRules(groupName: string, inheritStack: string[] = []): string[] {
         if (groupName in this.groupRules) {
             return this.groupRules[groupName];
         }
@@ -129,16 +134,22 @@ export class RoleManager {
         let baseRules = this.baseGroupRules[groupName] ?? [];
 
         /** 另外添加的权限，包含继承的权限 */
-        let appendRules: number[] = [];
+        let appendRules: string[] = [];
 
         /** 移除的权限，包含继承的权限 */
-        let stripRules: number[] = [];
+        let stripRules: string[] = [];
 
         if (!(groupName in this.groupsConfig.value)) {
             throw new Error(`Group ${groupName} not found in groups config!`);
         }
 
         let groupConfig = this.groupsConfig.value[groupName];
+
+        if (groupConfig.bindBotRoles) {
+            for (let role of groupConfig.bindBotRoles) {
+                this.botRoleMap[role] = groupName;
+            }
+        }
 
         if (groupConfig.inherit && groupConfig.inherit.length > 0) {
             let newInheritStack = [...inheritStack, groupName];
@@ -151,9 +162,9 @@ export class RoleManager {
         if (groupConfig.rules) {
             for (let rule in groupConfig.rules) {
                 if (groupConfig.rules[rule]) {
-                    appendRules.push(this.rulesIdMap[rule]);
+                    appendRules.push(rule);
                 } else {
-                    stripRules.push(this.rulesIdMap[rule]);
+                    stripRules.push(rule);
                 }
             }
         }
@@ -182,22 +193,13 @@ export class RoleManager {
     public makeGroupRulesMap() {
         // 清除缓存
         this.groupRules = {};
-        this.purgeRules();
+        this.botRoleMap = {};
 
         for (let groupName in this.groupsConfig.value) {
             if (!(groupName in this.groupRules)) {
                 this.getOneGroupRules(groupName);
             }
         }
-    }
-
-    /**
-     * 将用户的分组转换为权限规则标识
-     * @param ruleIds 
-     * @returns 
-     */
-    public ruleIdsToString(ruleIds: number[]): string[] {
-        return ruleIds.map(id => this.rulesList[id]);
     }
 
     /**
@@ -213,6 +215,14 @@ export class RoleManager {
             const userId = chatIdentity.userId!;
             const rootGroupId = chatIdentity.rootGroupId;
             const groupId = chatIdentity.groupId;
+
+            if (chatIdentity.userRoles) { // 添加机器人角色对应的用户组
+                for (let botRole of chatIdentity.userRoles) {
+                    if (botRole in this.botRoleMap) {
+                        userGroups.push(this.botRoleMap[botRole]);
+                    }
+                }
+            }
 
             // 优化：如果当前机器人没有任何配置，直接返回默认的user分组
             if (!(robotId in this.userGroupsConfig.value)) {
@@ -241,7 +251,7 @@ export class RoleManager {
             }
 
             return [...new Set(userGroups)];
-        });
+        }, CACHE_EXPIRE);
     }
 
     /**
@@ -249,10 +259,10 @@ export class RoleManager {
      * @param chatIdentity 
      * @returns 
      */
-    public async getUserRules(chatIdentity: ChatIdentity): Promise<number[]> {
+    public async getUserRules(chatIdentity: ChatIdentity): Promise<string[]> {
         return this.cache.wrap(`userRules:${chatIdentityToCacheKey(chatIdentity)}`, async () => {
             let userGroups = await this.getUserGroups(chatIdentity);
-            let userRules: number[] = [];
+            let userRules: string[] = [];
             for (let group of userGroups) {
                 let groupRules = this.getOneGroupRules(group);
                 userRules.push(...groupRules);
@@ -262,7 +272,7 @@ export class RoleManager {
             userRules = [...new Set(userRules)];
     
             return userRules;
-        });
+        }, CACHE_EXPIRE);
     }
 
     /**
@@ -273,10 +283,9 @@ export class RoleManager {
      */
     public async userCan(chatIdentity: ChatIdentity, ...rules: string[]): Promise<boolean> {
         let userRules = await this.getUserRules(chatIdentity);
-        let ruleIds = rules.map(rule => this.rulesIdMap[rule]);
-
-        for (let ruleId of ruleIds) {
-            if (!userRules.includes(ruleId)) {
+        
+        for (let rule of rules) {
+            if (!userRules.includes(rule)) {
                 return false;
             }
         }
@@ -290,12 +299,11 @@ export class RoleManager {
      * @param rules 
      * @returns 
      */
-    public async userCanAny(chatIdentity: ChatIdentity, ...rules: string[]): Promise<boolean> {
+    public async userCanAny(chatIdentity: ChatIdentity, botRole: string | null = null, ...rules: string[]): Promise<boolean> {
         let userRules = await this.getUserRules(chatIdentity);
-        let ruleIds = rules.map(rule => this.rulesIdMap[rule]);
 
-        for (let ruleId of ruleIds) {
-            if (userRules.includes(ruleId)) {
+        for (let rule of rules) {
+            if (userRules.includes(rule)) {
                 return true;
             }
         }
@@ -303,15 +311,84 @@ export class RoleManager {
         return false;
     }
 
+    private chatIdentityToUserKey(chatIdentity: ChatIdentity) {
+        if (chatIdentity.userId && chatIdentity.groupId && chatIdentity.rootGroupId) {
+            return `${chatIdentity.userId}@${chatIdentity.rootGroupId}:${chatIdentity.groupId}`;
+        } else if (chatIdentity.userId && chatIdentity.groupId) {
+            return `${chatIdentity.userId}@${chatIdentity.groupId}`;
+        } else if (chatIdentity.userId) {
+            return chatIdentity.userId;
+        }
+    
+        return '';
+    }
+
+    /**
+     * 将用户添加到组
+     * @param chatIdentity 
+     * @param group 
+     */
     public async userJoinGroup(chatIdentity: ChatIdentity, group: string) {
+        let userKey = this.chatIdentityToUserKey(chatIdentity);
+        if (!userKey) {
+            throw new Error('Invalid chat identity');
+        }
 
+        let robotId = chatIdentity.robot.robotId;
+
+        if (!(robotId in this.userGroupsConfig.value)) {
+            this.userGroupsConfig.value[robotId] = {};
+        }
+        if (!(userKey in this.userGroupsConfig.value[robotId])) {
+            this.userGroupsConfig.value[robotId][userKey] = [];
+        }
+
+        this.userGroupsConfig.value[robotId][userKey].push(group);
+        
+        this.userGroupsConfig.lazySave();
     }
 
+    /**
+     * 将用户从组中移除
+     * @param chatIdentity 
+     * @param group 
+     */
     public async userLeaveGroup(chatIdentity: ChatIdentity, group: string) {
+        let userKey = this.chatIdentityToUserKey(chatIdentity);
+        if (!userKey) {
+            throw new Error('Invalid chat identity');
+        }
 
+        let robotId = chatIdentity.robot.robotId;
+
+        if (this.userGroupsConfig.value[robotId]?.[userKey]) {
+            const botUserGroups = this.userGroupsConfig.value[robotId];
+            botUserGroups[userKey] = botUserGroups[userKey].filter(g => g !== group);
+        }
+
+        if (this.userGroupsConfig.value[robotId][userKey].length === 0) {
+            delete this.userGroupsConfig.value[robotId][userKey];
+        }
+
+        this.userGroupsConfig.lazySave();
     }
 
+    /**
+     * 清除用户的所有用户组
+     * @param chatIdentity 
+     */
     public async userResetGroups(chatIdentity: ChatIdentity) {
+        let robotId = chatIdentity.robot.robotId;
 
+        const botUserGroups = this.userGroupsConfig.value[robotId];
+        if (botUserGroups) {
+            for (let key in botUserGroups) {
+                if (key === chatIdentity.userId || key.startsWith(`${chatIdentity.userId}@`)) {
+                    delete botUserGroups[key];
+                }
+            }
+        }
+
+        this.userGroupsConfig.lazySave();
     }
 }
