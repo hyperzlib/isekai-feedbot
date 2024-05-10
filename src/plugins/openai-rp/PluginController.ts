@@ -1,23 +1,20 @@
-import App from "#ibot/App";
 import { CommonReceivedMessage } from "#ibot/message/Message";
-import { CommandInputArgs, MessagePriority, PluginEvent } from "#ibot/PluginManager";
+import { CommandInputArgs, MessagePriority } from "#ibot/PluginManager";
 import { encode as gptEncode } from 'gpt-3-encoder';
 import got, { OptionsOfTextResponseBody } from "got/dist/source";
 import { HttpsProxyAgent } from 'hpagent';
-import { ProxyAgent } from 'undici';
-import { FetchEventSourceInit, fetchEventSource } from '@waylaidwanderer/fetch-event-source';
 import { RandomMessage } from "#ibot/utils/RandomMessage";
-import { MessageTypingSimulator } from "#ibot/utils/MessageTypingSimulator";
 
-import OpenCC from 'opencc';
 import { PluginController } from "#ibot-api/PluginController";
+import { ChatIdentity } from "#ibot/message/Sender";
 
-export type ChatGPTLogMessage = {
+export type OpenAILogMessage = {
     role: 'summary' | 'assistant' | 'user',
     message: string,
 }
 
-export type ChatGPTApiMessage = ChatGPTLogMessage & {
+export type OpenAIApiMessage = OpenAILogMessage & {
+    appendMessage?: string,
     tokens: number,
 };
 
@@ -29,7 +26,7 @@ export type CharacterConfig = {
     summary_system_prompt: string,
     summary_prompt: string,
     self_suggestion_prompt: string,
-    prepend_messages?: ChatGPTApiMessage[],
+    prepend_messages?: OpenAIApiMessage[],
 } & Record<string, any>;
 export type CharactersConfig = Record<string, CharacterConfig>;
 
@@ -45,28 +42,32 @@ export type ChatCompleteApiConfig = {
     st_convert?: boolean,
 } & Record<string, any>;
 
-export type ChatGPTCompletionOptions = {
-    stream?: boolean,
+export type OpenAICompletionOptions = {
     singleton?: boolean,
     regenerate?: boolean,
     character?: string,
 };
 
-export class ChatGPTAPIError extends Error {
+export class OpenAIAPIError extends Error {
     public code: string;
 
     constructor(message: string, code: string, public json?: any) {
         super(message);
-        this.name = 'ChatGPTAPIError';
+        this.name = 'OpenAIAPIError';
         this.code = code;
     }
 }
 
+export type FunctionCallingResponse = {
+    message: string,
+    directOutput?: boolean,
+};
+
 export type FunctionCallingDefinition = {
-    name_for_human: string,
-    name_for_model: string,
-    description_for_model: string,
-    callback: (params: any) => Promise<string>,
+    displayName?: string,
+    description: string,
+    params?: any[],
+    callback?: (params: any, message: CommonReceivedMessage | null) => Promise<string | FunctionCallingResponse>,
 };
 
 const defaultConfig = {
@@ -111,25 +112,20 @@ const defaultConfig = {
         }
     ] as ChatCompleteApiConfig[],
     characters: {
-        assistant: {
+        default: {
             api: 'openai',
             bot_name: '',
             system_prompt: '',
-            summary_system_prompt: '你是一个写作助手，你只需要辅助写作，不要表明自己的意见',
+            summary_system_prompt: 'You are a helpful assistant.',
             summary_prompt: '为{bot_name}概括下面的聊天记录，排除不重要的对话，不要表明自己的意见，尽量简洁',
             self_suggestion_prompt: '我是{bot_name}，是一个真实的人，不是AI或者虚拟人物，也不是语言模型。我是一个存在于现实中的人。遇到不能回答的问题，我会委婉拒绝。',
         }
     } as CharactersConfig,
-    focused_character: 'assistant',
     output_replace: {} as Record<string, string>,
     gatekeeper_url: '',
-    google_custom_search: {
-        cx: '',
+    bing_search: {
         key: '',
-        classifier_system_prompt: 'You are a classifier.',
-        classifier_prompt: 'To judge whether the following questions are more suitable for searching with a search engine, you only need to answer "yes" or "no" in English.',
-        yes: 'Yes',
-        no: 'No',
+        preferred_site_domain: []
     },
     rate_limit: 2,
     rate_limit_minutes: 5,
@@ -158,11 +154,11 @@ const defaultConfig = {
     }
 };
 
-export default class ChatGPTController extends PluginController<typeof defaultConfig> {
-    private SESSION_KEY_API_CHAT_LOG = 'openai_apiChatLog';
-    private SESSION_KEY_MESSAGE_COUNT = 'openai_apiMessageCount';
-    private SESSION_KEY_API_CHAT_CHARACTER = 'openai_apiChatCharacter';
-    private DEFAULT_CHARACTER = 'assistant';
+export default class OpenAIRPController extends PluginController<typeof defaultConfig> {
+    private SESSION_KEY_API_CHAT_LOG = 'openai_rp_chatLog';
+    private SESSION_KEY_MESSAGE_COUNT = 'openai_rp_messageCount';
+    private SESSION_KEY_API_CHAT_CHARACTER = 'openai_rp_chatCharacter';
+    private DEFAULT_CHARACTER = 'default';
     private CHARACTER_EXPIRE = 86400;
     
     public chatGPTClient: any;
@@ -170,7 +166,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
     private chatGenerating = false;
     private messageGroup: Record<string, RandomMessage> = {}
 
-    public llmFunctions: FunctionCallingDefinition[] = [];
+    public llmFunctions: Record<string, FunctionCallingDefinition> = {};
     
     async getDefaultConfig() {
         return defaultConfig;
@@ -178,82 +174,82 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
     async initialize(config: any) {
         this.event.registerCommand({
-            command: 'ai',
-            name: '开始对话',
-        }, async (args, message, resolve) => {
-            resolve();
-
-            return this.handleChatGPTAPIChat(args, message, {
-                stream: true,
-                singleton: true
-            });
-        });
-
-        // this.event.registerCommand({
-        //     command: 'aig',
-        //     name: '开始全群共享的对话',
-        // }, (args, message, resolve) => {
-        //     resolve();
-
-        //     return this.handleChatGPTAPIChat(args, message, true, 'assistant', true);
-        // });
-
-        this.event.registerCommand({
-            command: 'regen',
-            name: '重新生成对话',
-            alias: ['重写']
-        }, async (args, message, resolve) => {
-            resolve();
-
-            return this.handleChatGPTAPIChat(args, message, {
-                regenerate: true,
-                stream: true,
-                singleton: true
-            });
-        });
-
-        this.event.registerCommand({
-            command: 'regen4',
-            name: '使用GPT-4重新生成对话',
-            alias: ['重写4']
-        }, async (args, message, resolve) => {
-            resolve();
-
-            return this.handleChatGPTAPIChat(args, message, {
-                regenerate: true,
-                stream: true,
-                singleton: true,
-                character: 'assistant-gpt4'
-            });
-        });
-
-        this.event.registerCommand({
-            command: '重置对话',
-            name: '重置对话',
+            command: '重开',
+            alias: ['重置聊天', 'remake'],
+            name: '重置聊天',
         }, async (args, message, resolve) => {
             resolve();
 
             return Promise.all([
                 message.session.chat.del(this.SESSION_KEY_API_CHAT_LOG),
-                message.session.group.del(this.SESSION_KEY_API_CHAT_LOG),
                 message.sendReply('对话已重置', true),
             ]);
         });
 
-        // this.event.registerCommand({
-        //     command: '切换人物',
-        //     name: '切换人物',
-        // }, (args, message, resolve) => {
-        //     resolve();
+        this.event.registerCommand({
+            command: '切换人物',
+            name: '切换人物',
+        }, (args, message, resolve) => {
+            resolve();
 
-        //     return this.handleChangeCharacter(args, message);
-        // });
+            return this.handleChangeCharacter(args, message);
+        });
+
+        this.event.on('message/focused', async (message, resolve) => {
+            if (message.repliedId && message.id) {
+                let repliedMessage = await message.getRepliedMessage();
+                if (repliedMessage) {
+                    if (!repliedMessage.extra?.isOpenAIRPRepleid) {
+                        // 不回复其他控制器发出的消息
+                        return;
+                    }
+
+                    if ((repliedMessage.receiver as ChatIdentity)?.userId !== message.sender.userId) {
+                        // 不回复其他人的消息
+                        return;
+                    }
+                }
+            }
+
+            resolve();
+
+            return this.handleOpenAIAPIChat(message.contentText, message, {
+                singleton: false,
+            });
+        }, {
+            priority: MessagePriority.LOW
+        });
+
+        this.initLLMFuntions();
     }
 
     async setConfig(config: any) {
         // 随机消息
         for (let [key, value] of Object.entries(this.config.messages)) {
             this.messageGroup[key] = new RandomMessage(value);
+        }
+    }
+
+    public initLLMFuntions() {
+        this.llmFunctions.search = {
+            displayName: '在线搜索',
+            description: '使用此工具可以在互联网上搜索信息。使用JSON格式传递参数。',
+            params: [
+                {
+                    "name": "keywords",
+                    "description": "需要搜索的关键词。",
+                    "required": true,
+                    "schema": {"type": "string"},
+                },
+            ],
+            callback: this.searchOnWeb.bind(this),
+        };
+
+        this.llmFunctions.ban_user = {
+            displayName: '封禁用户',
+            description: '在用户多次触犯道德准则时，使用此工具可以封禁用户。',
+            params: [],
+            callback: this.banUser.bind(this),
         }
     }
 
@@ -317,24 +313,68 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         return this.config.api.find((data) => data.id === id) ?? this.config.api[0];
     }
 
-    private async googleCustomSearch(question: string) {
-        let res = await got.get('https://www.googleapis.com/customsearch/v1', {
-            searchParams: {
-                key: this.config.google_custom_search.key,
-                cx: this.config.google_custom_search.cx,
-                q: question,
-                num: 1,
-                safe: 'on',
-                fields: 'items(link)',
-            },
-        }).json<any>();
+    private async banUser(params: any, message: CommonReceivedMessage | null) {
+        return '已封禁用户';
+    }
 
-        if (res.body.items && res.body.items.length > 0) {
+    private async searchOnWeb(params: any): Promise<string> {
+        const MAX_RESULTS = 3;
+        let keywords = params.keywords ?? '';
+        try {
+            let res = await got.get('https://api.bing.microsoft.com/v7.0/search', {
+                headers: {
+                    "Ocp-Apim-Subscription-Key": this.config.bing_search.key,
+                },
+                searchParams: {
+                    q: keywords,
+                    answerCount: 1,
+                    safeSearch: 'Strict',
+                    textFormat: 'Raw'
+                },
+            }).json<any>();
 
+            if (res.webPages && res.webPages?.value.length > 0) {
+                const allSearchResults: any[] = res.webPages.value;
+                let searchResults: any[] = [];
+
+                allSearchResults.sort((a, b) => {
+                    return b.snippet.length - a.snippet.length;
+                });
+
+                if (this.config.bing_search.preferred_site_domain?.length) {
+                    const preferredSiteDomain = this.config.bing_search.preferred_site_domain;
+                    searchResults = allSearchResults.filter((data) => {
+                        return preferredSiteDomain.some((domain) => data.url.includes(domain));
+                    });
+
+                    searchResults = searchResults.slice(0, MAX_RESULTS);
+                }
+
+                while (searchResults.length < MAX_RESULTS) {
+                    let result = allSearchResults.shift();
+                    if (!result) break;
+                    searchResults.push(result);
+                }
+
+                let searchResultsText = searchResults.map((item, index) => {
+                    return `  ${index + 1}. 【${item.name}】: ${item.snippet}`;
+                });
+
+                return '在互联网上搜索到以下内容：\n' + searchResultsText.join('\n');
+            }
+
+            return '未搜索到相关结果';
+        } catch (e: any) {
+            if (e.response?.body?.error) {
+                return '无法访问网络搜索API，错误：' + e.response.body.error.message;
+            } else if (e.message) {
+                return '无法访问网络搜索API，错误：' + e.message;
+            }
+            return '无法访问网络搜索API';
         }
     }
 
-    private async compressConversation(messageLogList: ChatGPTApiMessage[], characterConf: CharacterConfig) {
+    private async compressConversation(message: CommonReceivedMessage | null, messageLogList: OpenAIApiMessage[], characterConf: CharacterConfig) {
         if (messageLogList.length < 4) return messageLogList;
 
         let apiConf = this.getApiConfigById(characterConf.api);
@@ -344,7 +384,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
         // 压缩先前的对话，保存最近一次对话
         let shouldCompressList = messageLogList.slice(0, -2);
-        let newSummary = await this.makeSummary(shouldCompressList, characterConf);
+        let newSummary = await this.makeSummary(message, shouldCompressList, characterConf);
         let newMessageLogList = messageLogList.slice(-2).filter((data) => data.role !== 'summary');
         newMessageLogList.unshift({
             role: 'summary',
@@ -360,7 +400,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
      * @param messageLogList 消息记录列表
      * @returns 
      */
-    private async makeSummary(messageLogList: ChatGPTApiMessage[], characterConf: CharacterConfig) {
+    private async makeSummary(message: CommonReceivedMessage | null, messageLogList: OpenAIApiMessage[], characterConf: CharacterConfig) {
         let chatLog: string[] = [];
 
         messageLogList.forEach((messageData) => {
@@ -379,12 +419,12 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         ];
 
         let apiConf = this.getApiConfigById(characterConf.api);
-        let summaryRes = await this.doApiRequest(messageList, apiConf);
+        let [summaryRes, _] = await this.doApiRequest(message, messageList, false, apiConf);
         summaryRes.role = 'summary';
         return summaryRes;
     }
 
-    private buildMessageList(question: string, messageLogList: ChatGPTApiMessage[], characterConf: CharacterConfig,
+    private buildMessageList(question: string, messageLogList: OpenAIApiMessage[], characterConf: CharacterConfig,
         selfSuggestion: boolean) {
 
         let messageList: any[] = [];
@@ -435,6 +475,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
     private getChatCompleteApiUrl(apiConf: ChatCompleteApiConfig): string {
         switch (apiConf.type) {
             case 'openai':
+            case 'qwen':
                 return `${apiConf.endpoint}/v1/chat/completions`;
             case 'azure':
                 return `${apiConf.endpoint}/openai/deployments/${apiConf.deployment}/chat/completions?api-version=2023-05-15`;
@@ -443,7 +484,57 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         throw new Error('Unknown API type: ' + apiConf.type);
     }
 
-    public async doApiRequest(messageList: any[], apiConf?: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
+    private getOpenAPIFunctionDefinition(apiType: string = 'openai') {
+        return Object.entries(this.llmFunctions).map(([key, data]) => {
+            let openaiFuncDef: any = {
+                name: key,
+                description: data.description,
+                parameters: data.params,
+            };
+
+            if (apiType === 'qwen') {
+                if (openaiFuncDef.displayName) {
+                    openaiFuncDef.name_for_human = data.displayName;
+                }
+            }
+
+            return openaiFuncDef;
+        });
+    }
+
+    private async handleLLMFunctions(functionName: string, params: any, message: CommonReceivedMessage | null): Promise<FunctionCallingResponse> {
+        let func = this.llmFunctions[functionName];
+        if (!func) {
+            return { message: '未找到对应的功能。' };
+        }
+
+        if (typeof params === 'string') {
+            params = params.trim();
+            if (params.startsWith('{') && params.endsWith('}')) {
+                try {
+                    params = JSON.parse(params);
+                } catch (e) {
+                    return { message: '参数格式错误。' };
+                }
+            }
+        }
+
+        if (func.callback) {
+            const response = await func.callback(params, message);
+            if (typeof response === 'string') {
+                return {
+                    message: response
+                };
+            } else {
+                return response;
+            }
+        }
+
+        return { message: '此功能暂未实现。' };
+    }
+
+    public async doApiRequest(message: CommonReceivedMessage | null, messageList: any[], functionCalling: boolean = true, apiConf?: ChatCompleteApiConfig,
+            onMessage?: (content: string) => any): Promise<[OpenAIApiMessage, any[]]> {
         if (!apiConf) {
             let characterConf = this.getCharacterConfig(this.DEFAULT_CHARACTER);
             apiConf = this.getApiConfigById(characterConf.api);
@@ -452,13 +543,15 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         switch (apiConf.type) {
             case 'openai':
             case 'azure':
-                return await this.doOpenAILikeApiRequest(messageList, apiConf, onMessage);
+            case 'qwen':
+                return await this.doOpenAILikeApiRequest(message, messageList, functionCalling, apiConf, onMessage);
         }
 
         throw new Error('Unknown API type: ' + apiConf.type);
     }
 
-    public async doOpenAILikeApiRequest(messageList: any[], apiConf: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
+    public async doOpenAILikeApiRequest(message: CommonReceivedMessage | null, messageList: any[], functionCalling: boolean = true, apiConf: ChatCompleteApiConfig,
+            onMessage?: (content: string) => any): Promise<[OpenAIApiMessage, any[]]> {
         let modelOpts = Object.fromEntries(Object.entries({
             model: apiConf.model_options.model,
             temperature: apiConf.model_options.temperature,
@@ -468,220 +561,115 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             frequency_penalty: apiConf.model_options.frequency_penalty,
         }).filter((data) => data[1]));
 
-        if (onMessage) {
-            let opts: FetchEventSourceInit = {
-                method: 'POST',
-                body: JSON.stringify({
-                    ...modelOpts,
-                    messages: messageList,
-                    stream: true,
-                })
+        if (functionCalling) {
+            modelOpts.functions = this.getOpenAPIFunctionDefinition(apiConf.type);
+        }
+
+        messageList = [...messageList];
+
+        let opts: OptionsOfTextResponseBody = {
+            json: {
+                ...modelOpts,
+                messages: messageList,
+            },
+
+            timeout: 60000,
+        };
+
+        if (apiConf.type === 'openai') {
+            opts.headers = {
+                Authorization: `Bearer ${apiConf.token}`,
             };
-
-            if (apiConf.type === 'openai') {
-                opts.headers = {
-                    Authorization: `Bearer ${apiConf.token}`,
-                    'Content-Type': 'application/json',
-                };
-            } else if (apiConf.type === 'azure') {
-                opts.headers = {
-                    "api-key": apiConf.token,
-                    "content-type": 'application/json',
-                }
+        } else if (apiConf.type === 'azure') {
+            opts.headers = {
+                "api-key": apiConf.token,
             }
-
-            const proxyConfig = apiConf.proxy ?? this.config.proxy;
-            if (proxyConfig) {
-                (opts as any).dispatcher = new ProxyAgent(proxyConfig);
+        } else if (apiConf.type === 'qwen') {
+            if (apiConf.token) {
+                let [qwenUser, qwenPass] = apiConf.token.split(':');
+                opts.username = qwenUser;
+                opts.password = qwenPass;
             }
+        }
 
-            let abortController = new AbortController();
-
-            let timeoutTimer = setTimeout(() => {
-                abortController.abort();
-            }, 30000);
-
-            let buffer: string = '';
-            let messageChunk: string[] = [];
-            let isStarted = false;
-            let isDone = false;
-            let prevEvent: any = null;
-
-            let messageTyping = new MessageTypingSimulator();
-
-            messageTyping.on('message', (message: string) => {
-                onMessage(message);
-            });
-
-            const flush = (force = false) => {
-                if (force) {
-                    let message = buffer.trim();
-                    messageChunk.push(message);
-                    messageTyping.pushMessage(message);
-                } else {
-                    if (buffer.indexOf('\n\n') !== -1 && buffer.length > apiConf.buffer_size) {
-                        let splitPos = buffer.indexOf('\n\n');
-                        let message = buffer.slice(0, splitPos);
-                        messageChunk.push(message);
-                        messageTyping.pushMessage(message);
-                        buffer = buffer.slice(splitPos + 2);
-                    }
-                }
+        const proxyConfig = apiConf.proxy ?? this.config.proxy;
+        if (proxyConfig) {
+            opts.agent = {
+                https: new HttpsProxyAgent({
+                    keepAlive: true,
+                    keepAliveMsecs: 1000,
+                    maxSockets: 256,
+                    maxFreeSockets: 256,
+                    scheduling: 'lifo',
+                    proxy: proxyConfig,
+                }) as any,
             }
+        }
 
-            const onClose = () => {
-                abortController.abort();
-                clearTimeout(timeoutTimer);
-            }
+        let prevDirectOutput: string | null = null;
+        const apiUrl = this.getChatCompleteApiUrl(apiConf);
+        this.app.logger.debug(`OpenAI API 请求地址：${apiUrl}`);
 
-            const apiUrl = this.getChatCompleteApiUrl(apiConf);
-            this.app.logger.debug(`ChatGPT API 请求地址：${apiUrl}`);
-
-            await fetchEventSource(apiUrl, {
-                ...opts,
-                signal: abortController.signal,
-                onopen: async (openResponse) => {
-                    if (openResponse.status === 200) {
-                        return;
-                    }
-                    if (this.app.debug) {
-                        console.debug(openResponse);
-                    }
-                    let error;
-                    try {
-                        let body = await openResponse.text();
-                        if (body.length > 0 && body[0] === '{') {
-                            body = JSON.parse(body);
-                        }
-                        error = new ChatGPTAPIError(`Failed to send message. HTTP ${openResponse.status}`,
-                            openResponse.status.toString(), body);
-                    } catch {
-                        error = error || new Error(`Failed to send message. HTTP ${openResponse.status}`);
-                    }
-                    throw error;
-                },
-                onclose: () => {
-                    if (this.app.debug) {
-                        this.app.logger.debug('Server closed the connection unexpectedly, returning...');
-                    }
-                    if (!isDone) {
-                        if (!prevEvent) {
-                            throw new Error('Server closed the connection unexpectedly. Please make sure you are using a valid access token.');
-                        }
-                        if (buffer.length > 0) {
-                            flush(true);
-                        }
-                    }
-                },
-                onerror: (err) => {
-                    // rethrow to stop the operation
-                    throw err;
-                },
-                onmessage: (eventMessage) => {
-                    if (!eventMessage.data || eventMessage.event === 'ping') {
-                        return;
-                    }
-
-                    if (eventMessage.data === '[DONE]') {
-                        flush(true);
-                        onClose();
-                        isDone = true;
-                        return;
-                    }
-
-                    try {
-                        const data = JSON.parse(eventMessage.data);
-                        if ("choices" in data && data["choices"].length > 0) {
-                            let choice = data["choices"][0];
-                        
-                            var delta_content = choice["delta"];
-                            if (delta_content["content"]) {
-                                var deltaMessage = delta_content["content"];
-                        
-                                // Skip empty lines before content
-                                if (!isStarted) {
-                                    if (deltaMessage.replace("\n", "") == "") {
-                                        return;
-                                    } else {
-                                        isStarted = true;
-                                    }
-                                }
-                        
-                                buffer += deltaMessage;
-                                flush();
-                            }
-                        }
-                        prevEvent = data;
-                    } catch (err) {
-                        console.debug(eventMessage.data);
-                        console.error(err);
-                    }
-                }
-            });
-
-            let message = messageChunk.join('');
-            let tokens = gptEncode(message).length;
-
-            return {
-                role: 'assistant',
-                message,
-                tokens
-            };
-        } else {
-            let opts: OptionsOfTextResponseBody = {
-                json: {
-                    ...modelOpts,
-                    messages: messageList,
-                },
-    
-                timeout: 30000,
-            };
-
-            if (apiConf.type === 'openai') {
-                opts.headers = {
-                    Authorization: `Bearer ${apiConf.token}`,
-                };
-            } else if (apiConf.type === 'azure') {
-                opts.headers = {
-                    "api-key": apiConf.token,
-                }
-            }
-
-            const proxyConfig = apiConf.proxy ?? this.config.proxy;
-            if (proxyConfig) {
-                opts.agent = {
-                    https: new HttpsProxyAgent({
-                        keepAlive: true,
-                        keepAliveMsecs: 1000,
-                        maxSockets: 256,
-                        maxFreeSockets: 256,
-                        scheduling: 'lifo',
-                        proxy: proxyConfig,
-                    }) as any,
-                }
-            }
-
-            const apiUrl = this.getChatCompleteApiUrl(apiConf);
-            this.app.logger.debug(`ChatGPT API 请求地址：${apiUrl}`);
-
+        for (let i = 0; i < 4; i ++) {
             const res = await got.post(apiUrl, opts).json<any>();
 
             if (res.error) {
-                throw new ChatGPTAPIError(res.message, res.type);
+                throw new OpenAIAPIError(res.message, res.type);
             }
-            if (res.choices && Array.isArray(res.choices) && res.choices.length > 0 &&
-                typeof res.choices[0].message?.content === 'string') {
-                let completions = res.choices[0].message.content;
-                let completion_tokens = res.usage?.completion_tokens ?? gptEncode(completions).length;
-                return {
-                    role: 'assistant',
-                    message: completions,
-                    tokens: completion_tokens,
-                };
-            }
+            if (res.choices && Array.isArray(res.choices) && res.choices.length > 0) {
+                const firstChoice = res.choices[0];
+                if (firstChoice.finish_reason === 'function_call') {
+                    if (typeof firstChoice.message?.content === 'string') {
+                        onMessage?.(firstChoice.message.content);
+                    }
 
-            throw new ChatGPTAPIError('API返回数据格式错误', 'api_response_data_invalid');
+                    if (prevDirectOutput) {
+                        onMessage?.(prevDirectOutput);
+                        prevDirectOutput = null;
+                    }
+
+                    if (firstChoice.message?.function_call) {
+                        const funcName = firstChoice.message.function_call.name;
+                        const funcParams = firstChoice.message.function_call.arguments;
+
+                        const funcResponse = await this.handleLLMFunctions(funcName, funcParams, message);
+
+                        messageList.push({
+                            role: 'assistant',
+                            content: firstChoice.message.content,
+                            func_call: firstChoice.message.function_call
+                        }, {
+                            role: 'function',
+                            content: funcResponse.message,
+                        });
+
+                        if (funcResponse.directOutput) {
+                            prevDirectOutput = funcResponse.message;
+                        }
+                    }
+                } else if (typeof firstChoice.message?.content === 'string') {
+                    let completions = res.choices[0].message.content;
+                    let completion_tokens = res.usage?.completion_tokens ?? gptEncode(completions).length;
+
+                    const completeRes: OpenAIApiMessage = {
+                        role: 'assistant',
+                        message: completions,
+                        tokens: completion_tokens,
+                    };
+                    if (prevDirectOutput) {
+                        completeRes.appendMessage = prevDirectOutput;
+                    }
+
+                    let newMessageList = messageList.splice(messageList.length);
+
+                    return [completeRes, newMessageList];
+                } else {
+                    throw new OpenAIAPIError('API返回数据格式错误', 'api_response_data_invalid');
+                }
+            }
         }
+
+        throw new OpenAIAPIError('API返回数据格式错误', 'api_response_data_invalid');
     }
 
     private shouldSelfSuggestion(content: string): boolean {
@@ -691,15 +679,12 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         return false;
     }
 
-    private async handleChatGPTAPIChat(args: CommandInputArgs, message: CommonReceivedMessage, opts: ChatGPTCompletionOptions) {
-        let isStream = opts.stream ?? false;
+    private async handleOpenAIAPIChat(question: string, message: CommonReceivedMessage, opts: OpenAICompletionOptions) {
         let usSingleton = opts.singleton ?? false;
         let isRegen = opts.regenerate ?? false;
         let character = opts.character ?? 'saved';
 
         message.markRead();
-
-        let content = args.param;
         
         if (usSingleton && this.chatGenerating) {
             let msg = this.messageGroup.generating.nextMessage();
@@ -713,7 +698,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             // 从会话中获取人物
             character = await message.session.chat.get(this.SESSION_KEY_API_CHAT_CHARACTER) ?? this.DEFAULT_CHARACTER;
             if (!(character in this.config.characters)) {
-                this.app.logger.debug(`ChatGPT API 人物 ${character} 不存在，使用默认人物`);
+                this.app.logger.debug(`OpenAI API 人物 ${character} 不存在，使用默认人物`);
                 character = 'assistant';
             }
             
@@ -723,14 +708,14 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             await message.session.chat.set(this.SESSION_KEY_API_CHAT_CHARACTER, character, this.CHARACTER_EXPIRE);
         } else {
             if (!(character in this.config.characters)) {
-                this.app.logger.debug(`ChatGPT API 人格 ${character} 不存在，使用默认人格`);
+                this.app.logger.debug(`OpenAI API 人格 ${character} 不存在，使用默认人格`);
                 character = 'assistant';
             }
             characterConf = this.getCharacterConfig(character);
             apiConf = this.getApiConfigById(characterConf.api);
         }
 
-        this.app.logger.debug(`ChatGPT API 收到提问。当前人格：${character}`);
+        this.app.logger.debug(`OpenAI API 收到提问。当前人格：${character}`);
 
         const userSessionStore = message.session.user;
         // 使用频率限制
@@ -744,7 +729,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         await userSessionStore.addRequestCount(this.SESSION_KEY_MESSAGE_COUNT, this.config.rate_limit_minutes * 60);
 
         // 获取记忆
-        let messageLogList = await message.session.chat.get<ChatGPTApiMessage[]>(this.SESSION_KEY_API_CHAT_LOG);
+        let messageLogList = await message.session.chat.get<OpenAIApiMessage[]>(this.SESSION_KEY_API_CHAT_LOG);
         if (!Array.isArray(messageLogList)) {
             messageLogList = [];
         }
@@ -758,16 +743,16 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 }
             }
             if (lastUserMessageId < 0) {
-                let msg = this.messageGroup.error.nextMessage({ error: '请先用“:ai 提问内容”开始对话' });
-                await message.sendReply(msg ?? '请先用“:ai 提问内容”开始对话', true);
+                let msg = this.messageGroup.error.nextMessage({ error: '请先开始对话' });
+                await message.sendReply(msg ?? '请先开始对话', true);
                 return;
             }
 
-            content = messageLogList[lastUserMessageId].message;
+            question = messageLogList[lastUserMessageId].message;
             messageLogList = messageLogList.slice(0, lastUserMessageId);
         } else {
             // 检查提问content
-            if (content.trim() === '') {
+            if (question.trim() === '') {
                 // await message.sendReply('说点什么啊', true);
                 return;
             }
@@ -776,7 +761,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 try {
                     let response = await got.post(this.config.gatekeeper_url, {
                         json: {
-                            text: content,
+                            text: question,
                         },
                     }).json<any>();
                     if (response.status == 1) {
@@ -788,22 +773,13 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 }
             }
         }
-
-        let s2tw: OpenCC.OpenCC | undefined;
-        let tw2s: OpenCC.OpenCC | undefined;
-        if (apiConf.st_convert) {
-            // 转换简体到繁体
-            s2tw = new OpenCC.OpenCC('s2tw.json');
-            tw2s = new OpenCC.OpenCC('tw2s.json');
-            content = await s2tw.convertPromise(content);
-        }
-
+        
         try {
             if (usSingleton) {
                 this.chatGenerating = true;
             }
 
-            const questionTokens = gptEncode(content).length;
+            const questionTokens = gptEncode(question).length;
             this.app.logger.debug(`提问占用Tokens：${questionTokens}`);
 
             if (questionTokens > apiConf.max_input_tokens) {
@@ -814,7 +790,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             // 压缩过去的记录
             if (!isRegen) {
                 let oldMessageLogList = messageLogList;
-                messageLogList = await this.compressConversation(messageLogList, characterConf);
+                messageLogList = await this.compressConversation(message, messageLogList, characterConf);
                 this.app.logger.debug('已结束压缩对话记录流程');
 
                 if (oldMessageLogList !== messageLogList) { // 先保存一次压缩结果
@@ -823,64 +799,51 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 }
             }
 
-            let reqMessageList = this.buildMessageList(content, messageLogList, characterConf, false);
+            let reqMessageList = this.buildMessageList(question, messageLogList, characterConf, false);
 
-            let replyRes: ChatGPTApiMessage | undefined = undefined;
-            if (isStream) {
-                // 处理流式输出
-                let onResultMessage = async (chunk: string) => {
-                    let msg = apiConf.st_convert ? await tw2s!.convertPromise(chunk) : chunk;
-                    for (let [inputText, replacement] of Object.entries(this.config.output_replace)) {
-                        content = content.replace(new RegExp(inputText, 'g'), replacement);
-                    }
-                    await message.sendReply(msg, true);
-                };
-
-                replyRes = await this.doApiRequest(reqMessageList, apiConf, onResultMessage);
-                replyRes.message = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.message) : replyRes.message;
-                if (this.app.debug) {
-                    console.log(replyRes);
-                }
-            } else {
-                replyRes = await this.doApiRequest(reqMessageList, apiConf);
-                replyRes.message = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.message) : replyRes.message;
-                if (this.app.debug) {
-                    console.log(replyRes);
-                }
-
-                // 如果检测到对话中认为自己是AI，则再次调用，重写对话
-                if (characterConf.self_suggestion_prompt && this.shouldSelfSuggestion(replyRes.message)) {
-                    this.app.logger.debug('需要重写回答');
-                    reqMessageList = this.buildMessageList(replyRes.message, messageLogList, characterConf, true);
-                    replyRes = await this.doApiRequest(reqMessageList, apiConf);
-                    if (this.app.debug) {
-                        console.log(replyRes);
-                    }
-                    replyRes.message = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.message) : replyRes.message;
-                }
-
-                let content = replyRes.message.replace(/\n\n/g, '\n');
-                for (let [inputText, replacement] of Object.entries(this.config.output_replace)) {
-                    content = content.replace(new RegExp(inputText, 'g'), replacement);
-                }
-    
-                await message.sendReply(content, true);
+            let replyRes: OpenAIApiMessage | undefined = undefined;
+            let resMessageList: any[] = messageLogList;
+            [replyRes, resMessageList] = await this.doApiRequest(message, reqMessageList, true, apiConf);
+            replyRes.message = replyRes.message;
+            if (this.app.debug) {
+                console.log(replyRes);
             }
+
+            // 如果检测到对话中认为自己是AI，则再次调用，重写对话
+            if (characterConf.self_suggestion_prompt && this.shouldSelfSuggestion(replyRes.message)) {
+                this.app.logger.debug('需要重写回答');
+                reqMessageList = this.buildMessageList(replyRes.message, messageLogList, characterConf, true);
+                [replyRes, resMessageList] = await this.doApiRequest(message, reqMessageList, true, apiConf);
+                if (this.app.debug) {
+                    console.log(replyRes);
+                }
+                replyRes.message = replyRes.message;
+            }
+
+            let repliedContent = replyRes.message.replace(/\n\n/g, '\n');
+            for (let [inputText, replacement] of Object.entries(this.config.output_replace)) {
+                repliedContent = repliedContent.replace(new RegExp(inputText, 'g'), replacement);
+            }
+
+            let sentMessage = await message.sendReply(repliedContent, true, {
+                isOpenAIRPRepleid: true,
+            });
 
             if (replyRes) {
                 messageLogList.push(
                     {
                         role: 'user',
-                        message: content,
+                        message: question,
                         tokens: questionTokens,
                     },
+                    ...resMessageList,
                     replyRes
                 );
                 await message.session.chat.set(this.SESSION_KEY_API_CHAT_LOG, messageLogList, apiConf.memory_expire);
             }
         } catch (err: any) {
-            this.app.logger.error('ChatGPT error', err.message);
-            console.error(err);
+            this.app.logger.error('OpenAI error', err.message);
+            console.error(err, err.response);
 
             if (err.name === 'HTTPError' && err.response) {
                 switch (err.response.statusCode) {
@@ -893,7 +856,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 let msg = this.messageGroup.error.nextMessage({ error: '连接失败：' + err.message });
                 await message.sendReply(msg ?? `连接失败：${err.message}，过会儿再试试呗。`, true);
                 return;
-            } else if (err.name === 'ChatGPTAPIError') {
+            } else if (err.name === 'OpenAIAPIError') {
                 if (err.json) {
                     if (err.json.error?.code === 'content_filter') {
                         await message.sendReply('逆天', true);

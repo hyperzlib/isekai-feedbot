@@ -1,0 +1,5 @@
+id: openai_rp
+name: "OpenAI Role Playing"
+description: "角色扮演AI的功能"
+author: "Hyperzlib <hyperzlib@outlook.com>"
+controller: "PluginController"

@@ -223,11 +223,10 @@ export class EventManager {
                 // 检测控制器是否已禁用
                 if (!this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, subscribedPlugins)) {
                     if (isCommand) {
-                        // 如果是指令，则提示权限不足
-                        throw new PermissionDeniedError(ruleName);
-                    } else {
-                        continue;
+                        // 如果是指令，标记为权限不足
+                        console.log('权限不足：', eventScope.pluginId, eventScope.scopeName);
                     }
+                    continue;
                 }
             }
 

@@ -4,6 +4,7 @@ import { redisStore } from "cache-manager-ioredis-yet";
 import App from "./App";
 import { CacheConfig as CacheConfig } from "./types/config";
 import { RateLimitError } from "./error/errors";
+import micromatch from "micromatch";
 
 export class CacheManager {
     private app: App;
@@ -99,12 +100,17 @@ export class CacheStore implements Cache {
         return this.rootStore.get<T>(this.prefix + key);
     }
 
-    public del(key: string): Promise<void> {
-        return this.rootStore.del(this.prefix + key);
+    public async del(key: string): Promise<void> {
+        if (key.includes('*')) {
+            const keys = await this.rootStore.store.keys();
+            let matchedKeys = micromatch(keys, this.prefix + key);
+            return await this.rootStore.store.mdel(...matchedKeys);
+        }
+        return await this.rootStore.del(this.prefix + key);
     }
 
     public reset() {
-        return this.rootStore.store.del(this.prefix + '*');
+        return this.del(this.prefix + '*');
     }
 
     wrap<T>(key: string, fn: () => Promise<T>, ttl?: number | undefined): Promise<T> {
