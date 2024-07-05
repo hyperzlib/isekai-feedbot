@@ -1,6 +1,6 @@
 import App from "./App";
 import { CommandOverrideConfig } from "./types/config";
-import { PermissionDeniedError, RateLimitError } from "./error/errors";
+import { PermissionDeniedError, RateLimitError } from "../api/error/errors";
 import { CommonReceivedMessage } from "./message/Message";
 import { ChatIdentity } from "./message/Sender";
 import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
@@ -59,7 +59,7 @@ export class EventManager {
         
     }
 
-    public on(event: string, eventScope: PluginEvent, callback: CallableFunction, options?: MessageEventOptions) {
+    public on<Callback extends CallableFunction = CallableFunction>(event: string, eventScope: PluginEvent, callback: Callback, options?: MessageEventOptions) {
         if (!(event in this.eventList)) {
             this.eventList[event] = [];
         }

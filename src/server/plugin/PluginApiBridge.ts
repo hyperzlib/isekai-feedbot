@@ -1,6 +1,6 @@
 import { PluginController } from "#ibot-api/PluginController";
 import App from "#ibot/App";
-import { PluginEvent, PluginInstance, ScopeOptions } from "#ibot/PluginManager";
+import { PluginEvent, ScopeOptions } from "#ibot/PluginManager";
 
 export const MAIN_SCOPE_NAME = "main";
 
@@ -54,7 +54,7 @@ export class PluginApiBridge {
         return this.app.plugin.getPluginDataPath(this._pluginId, creation);
     }
 
-    public async getConfigPath() {
+    public getConfigPath() {
         return this.app.plugin.getPluginConfigPath(this._pluginId);
     }
 

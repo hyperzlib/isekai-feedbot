@@ -18,17 +18,6 @@ export default class SystemController extends PluginController {
             });
         });
 
-        this.useScope('manage', (event) => {
-            event.registerCommand({
-                command: '测试权限',
-                name: '测试权限',
-            }, (args, message, resolved) => {
-                resolved();
-
-                message.sendReply('权限测试通过');
-            });
-        });
-
         this.useScope('admin', (event) => {
 
         });
@@ -38,55 +27,82 @@ export default class SystemController extends PluginController {
         const senderInfo = this.app.event.getSenderInfo(message);
         const subscribedPlugins = this.app.plugin.getSubscribed(senderInfo);
 
-        let replyMsg = message.createReplyMessage();
-        replyMsg.type = 'help';
-        replyMsg._context.subscribed = subscribedPlugins;
+        if (args) { // 获取指定插件的帮助
+            let inputCommand = args.trim();
+            for (let subscribedItem of subscribedPlugins) {
+                let controller = subscribedItem.controller;
+                for (let eventGroup of subscribedItem.eventGroups) {
+                    for (let commandInfo of eventGroup.commandList) {
+                        if (commandInfo.command === inputCommand || commandInfo.alias?.includes(inputCommand)) {
+                            let replyMsg = message.createReplyMessage();
+                            replyMsg.type = 'commandHelp';
+                            replyMsg._context.subscribed = subscribedPlugins;
+                            replyMsg.content = [{
+                                type: ['text'],
+                                text: `【${controller.pluginInfo.name}】${commandInfo.name}\n\n${commandInfo.help ?? '此指令没有更详细的帮助'}`,
+                                data: {},
+                            }];
+                            
+                            await replyMsg.send();
+                            return;
+                        }
 
-        let helpBuilder: string[] = [];
-
-        let robotDescription = message.receiver.description;
-        if (robotDescription) {
-            helpBuilder.push(robotDescription);
-            helpBuilder.push('');
-        }
-
-        helpBuilder.push('功能列表：');
-
-        for (let subscribedItem of subscribedPlugins) {
-            let controller = subscribedItem.controller;
-            helpBuilder.push(`【${controller.pluginInfo.name}】`);
-
-            let commandList: CommandInfo[] = [];
-            for (let eventGroup of subscribedItem.eventGroups) {
-                commandList.push(...eventGroup.commandList);
+                    }
+                }
             }
-            if (commandList.length > 0) {
-                commandList.forEach(commandInfo => {
-                    helpBuilder.push(`/${commandInfo.command} - ${commandInfo.name}`);
-                });
-            } else {
-                helpBuilder.push('此功能没有指令');
+
+            await message.sendReply(`未找到指令：${inputCommand}`);
+        } else {
+            let replyMsg = message.createReplyMessage();
+            replyMsg.type = 'help';
+            replyMsg._context.subscribed = subscribedPlugins;
+
+            let helpBuilder: string[] = [];
+
+            let robotDescription = message.receiver.description;
+            if (robotDescription) {
+                helpBuilder.push(robotDescription);
+                helpBuilder.push('');
             }
-            helpBuilder.push('');
-        }
 
-        if (helpBuilder[helpBuilder.length - 1] === '') {
-            helpBuilder.pop();
-        }
+            helpBuilder.push('功能列表：');
 
-        if (this.app.debug) {
-            this.app.logger.debug(`收到帮助指令，已找到 ${subscribedPlugins.length} 个插件`);
-        }
+            for (let subscribedItem of subscribedPlugins) {
+                let controller = subscribedItem.controller;
+                helpBuilder.push(`【${controller.pluginInfo.name}】`);
 
-        replyMsg.content = [{
-            type: ['text'],
-            text: helpBuilder.join('\n'),
-            data: {},
-        }];
-        
-        if (this.app.debug) {
-            this.app.logger.debug('发送帮助信息');
+                let commandList: CommandInfo[] = [];
+                for (let eventGroup of subscribedItem.eventGroups) {
+                    commandList.push(...eventGroup.commandList);
+                }
+                if (commandList.length > 0) {
+                    commandList.forEach(commandInfo => {
+                        helpBuilder.push(`/${commandInfo.command} - ${commandInfo.name}`);
+                    });
+                } else {
+                    helpBuilder.push('此功能没有指令');
+                }
+                helpBuilder.push('');
+            }
+
+            if (helpBuilder[helpBuilder.length - 1] === '') {
+                helpBuilder.pop();
+            }
+
+            if (this.app.debug) {
+                this.app.logger.debug(`收到帮助指令，已找到 ${subscribedPlugins.length} 个插件`);
+            }
+
+            replyMsg.content = [{
+                type: ['text'],
+                text: helpBuilder.join('\n'),
+                data: {},
+            }];
+            
+            if (this.app.debug) {
+                this.app.logger.debug('发送帮助信息');
+            }
+            await replyMsg.send();
         }
-        await replyMsg.send();
     }
 }

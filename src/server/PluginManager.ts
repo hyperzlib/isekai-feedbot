@@ -126,11 +126,29 @@ export class PluginManager extends EventEmitter {
 
         await this.app.role.onPluginLoaded();
 
+        await this.postInit();
+
         this.configWatcher = chokidar.watch(path.join(this.configPath, '**/*.yaml'), {
             ignorePermissionErrors: true,
             persistent: true
         });
         this.configWatcher.on('change', this.reloadConfig.bind(this));
+    }
+
+    public async postInit() {
+        for (let plugin of Object.values(this.pluginInstanceMap)) {
+            try {
+                await plugin.controller.postInit();
+            } catch(err: any) {
+                this.app.logger.error(`插件 ${plugin.id} 延迟初始化失败`, err);
+                console.error(err);
+
+                this.emit('pluginPostInitFailed', plugin.controller);
+
+                // 移除插件
+                await this.unloadPlugin(plugin.id);
+            }
+        }
     }
 
     public async loadPlugin(folder: string) {
@@ -202,6 +220,20 @@ export class PluginManager extends EventEmitter {
                 const controllerConfig = await this.loadMainConfig(pluginId, controllerInstance);
 
                 await controllerInstance._initialize(controllerConfig);
+
+                if (isReload) { // 重新加载插件时，加载后就执行延迟加载函数
+                    try {
+                        await controllerInstance.postInit();
+                    } catch(err: any) {
+                        this.app.logger.error(`插件 ${pluginId} 延迟初始化失败`, err);
+                        console.error(err);
+
+                        this.emit('pluginPostInitFailed', controllerInstance);
+
+                        // 移除插件
+                        await this.unloadPlugin(pluginId);
+                    }
+                }
             } else {
                 throw new Error('PluginController does not have an export.');
             }

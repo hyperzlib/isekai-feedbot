@@ -438,6 +438,23 @@ export default class QQRobot implements RobotAdapter {
     }
 
     /**
+     * 踢出群成员
+     * @param groupId 
+     * @param userId 
+     */
+    async kickGroupUser(groupId: string, userId: string): Promise<boolean> {
+        const res = await this.callRobotApi('set_group_kick', {
+            group_id: groupId,
+            user_id: userId,
+        });
+        if (res && res.status === 'ok') {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
      * 发送私聊消息
      * @param user - QQ号
      * @param message - 消息
@@ -526,6 +543,77 @@ export default class QQRobot implements RobotAdapter {
             return res.data?.url ?? "";
         } else {
             return "";
+        }
+    }
+
+    // ================================================================================
+    //  QQ专用API
+    // ================================================================================
+    /**
+     * 设置群特殊头衔
+     * @param group 
+     * @param user 
+     * @param title 
+     * @returns 
+     */
+    async setGroupSpecialTitle(group: string, user: string, title: string) {
+        const res = await this.callRobotApi('set_group_special_title', {
+            group_id: group,
+            user_id: user,
+            special_title: title,
+        });
+        if (res && res.status === 'ok') {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * 封禁群成员
+     * @param group 
+     * @param user 
+     * @param duration 
+     * @returns 
+     */
+    async banGroupUser(group: string, user: string, duration: number) {
+        const res = await this.callRobotApi('set_group_ban', {
+            group_id: group,
+            user_id: user,
+            duration: duration,
+        });
+        if (res && res.status === 'ok') {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * 解除封禁群成员
+     * @param group 
+     * @param user 
+     * @returns 
+     */
+    async unbanGroupUser(group: string, user: string) {
+        return await this.banGroupUser(group, user, 0);
+    }
+
+    /**
+     * 设置群全员禁言
+     * @param group 
+     * @param enable 
+     * @returns 
+     */
+    async setGroupWholeBan(group: string, enable: boolean) {
+        const res = await this.callRobotApi('set_group_whole_ban', {
+            group_id: group,
+            enable: enable,
+        });
+        if (res && res.status === 'ok') {
+            return true;
+        } else {
+            return false;
         }
     }
 

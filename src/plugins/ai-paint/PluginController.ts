@@ -204,8 +204,8 @@ export default class StableDiffusionController extends PluginController<typeof d
             try {
                 let replyRes = await llmApi.doApiRequest(messageList);
                 let containsPrompt = false;
-                if (replyRes.message) {
-                    let reply = replyRes.message;
+                if (replyRes.outputMessage) {
+                    let reply = replyRes.outputMessage;
                     this.logger.debug(`ChatGPT返回: ${reply}`);
                     let matchedJson = reply.match(/\{.*\}/);
                     if (matchedJson) {

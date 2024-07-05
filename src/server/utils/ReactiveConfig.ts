@@ -8,6 +8,10 @@ export class ReactiveConfig<T extends {}> {
     public _value?: T;
     public _default: T;
 
+    private parserType: string;
+
+    private _loaded: boolean = false;
+
     private saving: boolean = false;
 
     private fileName: string;
@@ -20,6 +24,12 @@ export class ReactiveConfig<T extends {}> {
         this._default = defaultVal;
         this.fileName = fileName;
         this.eventEmitter = new EventEmitter();
+
+        if (fileName.endsWith('.yaml') || fileName.endsWith('.yml')) {
+            this.parserType = 'yaml';
+        } else {
+            this.parserType = 'json';
+        }
     }
 
     public get value(): T {
@@ -30,11 +40,24 @@ export class ReactiveConfig<T extends {}> {
         this._value = newVal;
     }
 
+    public get loaded() {
+        return this._loaded;
+    }
+
     public on(eventName: 'load', listener: () => void): void
     public on(eventName: 'change', listener: (newValue: T, oldValue: T) => void): void
     public on(eventName: 'saved', listener: (value: T) => void): void
     public on(eventName: string, listener: (...args: any[]) => void) {
         this.eventEmitter.on(eventName, listener);
+    }
+
+    public async initialize(autoCreate: boolean = true) {
+        let isSuccess = await this.load();
+        if (!isSuccess && autoCreate) {
+            this._value = this._default;
+            await this.save();
+        }
+        this._loaded = true;
     }
 
     public async destory() {
@@ -58,7 +81,7 @@ export class ReactiveConfig<T extends {}> {
     }
 
     /**
-     * 
+     * Load the config file
      * @returns 
      */
     public async load() {
@@ -69,13 +92,18 @@ export class ReactiveConfig<T extends {}> {
         let oldValue = this.value;
         if (existsSync(this.fileName)) {
             let content = await readFile(this.fileName, { encoding: 'utf-8' });
-            this._value = Yaml.parse(content);
+            if (this.parserType === 'json') {
+                this._value = JSON.parse(content);
+            } else {
+                this._value = Yaml.parse(content);
+            }
 
             if (oldValue) {
                 this.eventEmitter.emit('change', this._value, oldValue);
             } else {
                 this.eventEmitter.emit('load');
             }
+            this._loaded = true;
             return true;
         } else {
             return false;
@@ -85,7 +113,15 @@ export class ReactiveConfig<T extends {}> {
     public async save() {
         if (this._value) {
             this.saving = true;
-            await writeFile(this.fileName, Yaml.stringify(this._value));
+
+            let content: string;
+            if (this.parserType === 'json') {
+                content = JSON.stringify(this._value, null, 4);
+            } else {
+                content = Yaml.stringify(this._value);
+            }
+
+            await writeFile(this.fileName, content);
             this.eventEmitter.emit('saved', this._value);
             return true;
         }

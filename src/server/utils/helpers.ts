@@ -198,3 +198,31 @@ export function chatIdentityToCacheKey(chatIdentity: ChatIdentity) {
 
     return '';
 }
+
+export function splitPrefix(text: string, separator: string): [string, string] {
+    let index = text.indexOf(separator);
+    if (index === -1) {
+        return [text, ''];
+    } else {
+        return [text.substring(0, index), text.substring(index + separator.length)];
+    }
+}
+
+export function arrayDiff<T>(a: T[], b: T[]): { added: T[], removed: T[] } {
+    let added: T[] = [];
+    let removed: T[] = [];
+
+    for (let item of a) {
+        if (!b.includes(item)) {
+            removed.push(item);
+        }
+    }
+
+    for (let item of b) {
+        if (!a.includes(item)) {
+            added.push(item);
+        }
+    }
+
+    return { added, removed };
+}

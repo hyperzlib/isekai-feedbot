@@ -1,0 +1,37 @@
+{
+    "app": "com.tencent.mannounce",
+    "bizsrc": "",
+    "config": {
+        "ctime": 1711063965,
+        "forward": 0,
+        "token": "c9f639b8fbe8db5b74a23be4f9e97348"
+    },
+    "extra": {
+        "app_type": 1,
+        "appid": 1101236949,
+        "uin": 1525191974
+    },
+    "meta": {
+        "mannounce": {
+            "cr": 0,
+            "encode": 1,
+            "fid": "054bf009000000009dc3fc65f0520500",
+            "gc": "166742789",
+            "pic": [
+                {
+                    "height": 806,
+                    "url": "AKmBY5UfRJC6GfKOC6buGsiawG5w1SemmlxE2bSgMTzg",
+                    "width": 580
+                }
+            ],
+            "sign": "f44fbc5e5d074ea57b2143afa66ccd2b",
+            "text": "6YCa55So5oqW6Z+z5o6I5p2D55qE5YWs5ZGKCuacrOekvuWboueahOWFjei0ueearuWcqGLnq5nlhoXlj6/ku6XmraPluLjkuI3nlKjlh7rlhbfmjojmnYPlhY3otLnov5vooYzkvb/nlKjvvIjlm6Bi56uZ5rKh5pyJ55qu5b+F6aG76K+B5piO5piv6Ieq5bex55qE77yJ77yM5Zyo6ZmkQuermeS7peWklueahOW5s+WPsO+8jOaIkeS7rOS5n+iDveeci+WIsOaIkeS7rOWPkeW4g+eahOWFjei0ueaooeWei+S9v+eUqO+8jOS9huaYr+WcqOmZpELnq5nku6XlpJbnmoTlubPlj7DlvIDpgJromZrmi5/lgbblg4/lnoLnsbvnm7Tmkq3pnIDniYjmnYPor4HmmI7mlofku7blkoznlLXohJHlvIDmkq3mnYPpmZAK5Lmf5oGz6K+35Zyo6Zmk5LqGQuermeebtOaSreS9v+eUqOaIkeS7rOearueahOiAgeW4iOS7rO+8jOaPkOWJjei3n+aIkeS7rOivtO+8jOaIkeS7rOWPr+S7peS4uuaCqOW8gOWFt+ivgeaYjuWSjOW8gOmAmuWcqOaKlumfs+eUteiEkeebtOaSreadg+mZkOOAguaIkeS7rOW3sue7j+S4uuaIkeS7rOeahOaJgOacieaooeWei+azqOWGjOS6hueJiOadg+aWh+S7tu+8jOivt+WcqOaKlumfs+ebtOaSreeahOiAgeW4iO+8jOS9v+eUqOaIkeS7rOearueahOWFrOS8muivt+S4jeimgeWGjeaKouazqOaIkeS7rOaooeWei+eahOeJiOadg+aWh+S7tuS6hu+8geaIkeS7rOW3sue7j+WQkQrljJfkuqzlvq7mkq3op4bnlYznp5HmioDmnInpmZDlhazlj7jvvIjmipbpn7PvvInjgIHkuIrmtbflubvnlLXkv6Hmga/np5HmioDmnInpmZDlhazlj7jvvIhC56uZ77yJ5bey57uP5aOw5piO5p2D5Yqb5omA5bGe44CCCuWmgumcgOimgeW8gOWFt+ivgeaYju+8jOivt+engeiBiuaYk+WwpA==",
+            "title": "576k5YWs5ZGK",
+            "tw": 0,
+            "uin": "1525191974"
+        }
+    },
+    "prompt": "[群公告]通用抖音授权的公告本社团的免费皮在b站内可以正常不用出具授权免费进行使用（因b站没有皮必须证明是自己的），在除B站以外的平台，我们也能看到我们发布的免费模型使用，但是在除B站以外的平台开通虚拟偶像垂…",
+    "ver": "1.0.0.43",
+    "view": "main"
+}

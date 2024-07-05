@@ -1,5 +1,5 @@
 id: channel
-name: "Channel"
-description: "基础推送服务"
+name: "Channel Framework"
+description: "推送服务框架"
 author: "Hyperzlib <hyperzlib@outlook.com>"
 controller: "PluginController"

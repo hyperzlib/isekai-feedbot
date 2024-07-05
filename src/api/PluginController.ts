@@ -56,6 +56,8 @@ export class PluginController<ConfigType = Record<string, string>> {
     }
     public async initialize(config: any): Promise<void> { }
 
+    public async postInit(): Promise<void> { }
+
     public async destroy(): Promise<void> { };
 
     public async getDefaultConfig(): Promise<any> {
@@ -67,6 +69,14 @@ export class PluginController<ConfigType = Record<string, string>> {
         await this.setConfig(config);
     }
     public async setConfig(config: any): Promise<void> { }
+
+    public getConfigPath(): string {
+        return this._bridge.getConfigPath();
+    }
+
+    public async getDataPath(creation: boolean = false): Promise<string> {
+        return this._bridge.getDataPath(creation);
+    }
 
     public useScope(scopeName: string, callback: (event: PluginEvent) => void, scopeOptions?: ScopeOptions) {
         this._bridge.useScope(scopeName, callback, scopeOptions);

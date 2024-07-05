@@ -8,6 +8,7 @@ import { GroupUserInfoStorage } from "./GroupUserInfoStorage";
 import { MessageStorage } from "./MessageStorage";
 import { RootGroupInfoStorage } from "./RootGroupInfoStorage";
 import { UserInfoStorage } from "./UserInfoStorage";
+import EventEmitter from "events";
 
 export class RobotStorage {
     private app: App;
@@ -15,6 +16,9 @@ export class RobotStorage {
     private _robotId: string;
     private _robot?: Robot;
     private _models?: ModelRegistry;
+    private _onLoadCallbacks: CallableFunction[] = [];
+
+    private _readyState: 'create' | 'loading' | 'loaded' = 'create';
 
     public userInfo: UserInfoStorage;
     public channelInfo: ChannelInfoStorage;
@@ -37,15 +41,44 @@ export class RobotStorage {
     }
 
     public async initialize() {
-        this._models = await this.app.database?.getModels(this.robotId);
-        this._robot = await this.app.robot.getRobot(this.robotId) ?? undefined;
+        if (this._readyState === 'create') {
+            this._readyState = 'loading';
 
-        await this.userInfo.initialize();
-        await this.channelInfo.initialize();
-        await this.rootGroupInfo.initialize();
-        await this.groupInfo.initialize();
-        await this.groupUserInfo.initialize();
-        await this.message.initialize();
+            this._models = await this.app.database?.getModels(this.robotId);
+            this._robot = this.app.robot.getRobot(this.robotId) ?? undefined;
+
+            await this.userInfo.initialize();
+            await this.channelInfo.initialize();
+            await this.rootGroupInfo.initialize();
+            await this.groupInfo.initialize();
+            await this.groupUserInfo.initialize();
+            await this.message.initialize();
+
+            this._readyState = 'loaded';
+            
+            this._onLoadCallbacks.forEach((cb) => cb());
+            this._onLoadCallbacks = [];
+        }
+    }
+
+    public with(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            switch (this._readyState) {
+                case 'loaded':
+                    resolve();
+                    break;
+                case 'create':
+                    this.initialize().then(() => resolve()).catch((err) => reject(err));
+                    break;
+                case 'loading':
+                    this._onLoadCallbacks.push(() => resolve());
+                    break;
+            }
+        });
+    }
+
+    public get readyState() {
+        return this._readyState;
     }
 
     public get robotId() {

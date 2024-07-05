@@ -59,6 +59,7 @@ export type StorageConfig = {
     cache_ttl?: number;
     message?: {
         lru_limit?: number;
+        cleanup_expired_days?: number;
     };
 };
 

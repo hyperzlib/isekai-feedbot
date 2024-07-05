@@ -1,0 +1,5 @@
+id: pusher_channel
+name: "Pusher 消息推送"
+description: "从 Pusher.com 接收消息推送"
+author: "Hyperzlib <hyperzlib@outlook.com>"
+controller: "PluginController"

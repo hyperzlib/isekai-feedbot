@@ -28,6 +28,8 @@ export interface RobotAdapter {
     getChannelInfo?(channelId: string): Promise<ChannelInfoType | null>;
     getGroupUsersInfo?(userIds: string[], groupId: string, rootGroupId?: string): Promise<(GroupUserInfoType | null)[]>;
 
+    kickGroupUser?(groupId: string, userId: string): Promise<boolean>;
+
     parseDBMessage?(dbMessage: MessageSchemaType): Promise<CommonMessage>;
 }
 

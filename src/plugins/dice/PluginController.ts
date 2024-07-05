@@ -26,6 +26,10 @@ export default class DiceController extends PluginController<typeof defaultConfi
             alias: ['r'],
             help: '格式：|骰子数量|d|面数|(+|加成|)，示例：1d20、1d6+3'
         }, (args, message, resolved) => {
+            if (message.mentionedReceiver) { // 不使用@触发
+                return;
+            }
+
             resolved();
             
             this.rollDice(args, message);

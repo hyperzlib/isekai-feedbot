@@ -21,6 +21,12 @@ export type ChatGPTApiMessage = ChatGPTLogMessage & {
     tokens: number,
 };
 
+export type ChatGPTApiResponse = {
+    messageList: ChatGPTApiMessage[],
+    outputMessage: string,
+    totalTokens: number,
+}
+
 export type CharacterConfig = {
     api: string,
     bot_name: string,
@@ -62,11 +68,16 @@ export class ChatGPTAPIError extends Error {
     }
 }
 
+export type FunctionCallingResponse = {
+    message: string,
+    directOutput?: boolean,
+};
+
 export type FunctionCallingDefinition = {
-    name_for_human: string,
-    name_for_model: string,
-    description_for_model: string,
-    callback: (params: any) => Promise<string>,
+    displayName?: string,
+    description: string,
+    params?: any[],
+    callback?: (params: any, message: CommonReceivedMessage | null) => Promise<string | FunctionCallingResponse>,
 };
 
 const defaultConfig = {
@@ -123,13 +134,9 @@ const defaultConfig = {
     focused_character: 'assistant',
     output_replace: {} as Record<string, string>,
     gatekeeper_url: '',
-    google_custom_search: {
-        cx: '',
+    bing_search: {
         key: '',
-        classifier_system_prompt: 'You are a classifier.',
-        classifier_prompt: 'To judge whether the following questions are more suitable for searching with a search engine, you only need to answer "yes" or "no" in English.',
-        yes: 'Yes',
-        no: 'No',
+        preferred_site_domain: []
     },
     rate_limit: 2,
     rate_limit_minutes: 5,
@@ -164,14 +171,14 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
     private SESSION_KEY_API_CHAT_CHARACTER = 'openai_apiChatCharacter';
     private DEFAULT_CHARACTER = 'assistant';
     private CHARACTER_EXPIRE = 86400;
-    
+
     public chatGPTClient: any;
 
     private chatGenerating = false;
     private messageGroup: Record<string, RandomMessage> = {}
 
-    public llmFunctions: FunctionCallingDefinition[] = [];
-    
+    public llmFunctions: Record<string, FunctionCallingDefinition> = {};
+
     async getDefaultConfig() {
         return defaultConfig;
     }
@@ -248,6 +255,8 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
         //     return this.handleChangeCharacter(args, message);
         // });
+
+        this.initLLMFuntions();
     }
 
     async setConfig(config: any) {
@@ -255,6 +264,22 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         for (let [key, value] of Object.entries(this.config.messages)) {
             this.messageGroup[key] = new RandomMessage(value);
         }
+    }
+
+    public initLLMFuntions() {
+        this.llmFunctions.search = {
+            displayName: '在线搜索',
+            description: '使用此工具可以在互联网上搜索信息。使用JSON格式传递参数。',
+            params: [
+                {
+                    "name": "keywords",
+                    "description": "需要搜索的关键词。",
+                    "required": true,
+                    "schema": { "type": "string" },
+                },
+            ],
+            callback: this.searchOnWeb.bind(this),
+        };
     }
 
     private async handleChangeCharacter(args: CommandInputArgs, message: CommonReceivedMessage) {
@@ -288,7 +313,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         await message.session.chat.set(this.SESSION_KEY_API_CHAT_CHARACTER, character, this.CHARACTER_EXPIRE);
 
         let characterInfo = this.config.characters[character];
-        
+
         return message.sendReply(`已切换人物为 ${characterInfo.bot_name}`, true);
     }
 
@@ -302,7 +327,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
     private getCharacterConfig(id: string) {
         let characterConf = this.config.characters[id] ?? this.config.characters[this.DEFAULT_CHARACTER];
-        characterConf = {...characterConf};
+        characterConf = { ...characterConf };
 
         const currentDate = this.getDateStr();
 
@@ -317,20 +342,60 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         return this.config.api.find((data) => data.id === id) ?? this.config.api[0];
     }
 
-    private async googleCustomSearch(question: string) {
-        let res = await got.get('https://www.googleapis.com/customsearch/v1', {
-            searchParams: {
-                key: this.config.google_custom_search.key,
-                cx: this.config.google_custom_search.cx,
-                q: question,
-                num: 1,
-                safe: 'on',
-                fields: 'items(link)',
-            },
-        }).json<any>();
+    private async searchOnWeb(params: any): Promise<string> {
+        const MAX_RESULTS = 3;
+        let keywords = params.keywords ?? '';
+        try {
+            let res = await got.get('https://api.bing.microsoft.com/v7.0/search', {
+                headers: {
+                    "Ocp-Apim-Subscription-Key": this.config.bing_search.key,
+                },
+                searchParams: {
+                    q: keywords,
+                    answerCount: 1,
+                    safeSearch: 'Strict',
+                    textFormat: 'Raw'
+                },
+            }).json<any>();
 
-        if (res.body.items && res.body.items.length > 0) {
+            if (res.webPages && res.webPages?.value.length > 0) {
+                const allSearchResults: any[] = res.webPages.value;
+                let searchResults: any[] = [];
 
+                allSearchResults.sort((a, b) => {
+                    return b.snippet.length - a.snippet.length;
+                });
+
+                if (this.config.bing_search.preferred_site_domain?.length) {
+                    const preferredSiteDomain = this.config.bing_search.preferred_site_domain;
+                    searchResults = allSearchResults.filter((data) => {
+                        return preferredSiteDomain.some((domain) => data.url.includes(domain));
+                    });
+
+                    searchResults = searchResults.slice(0, MAX_RESULTS);
+                }
+
+                while (searchResults.length < MAX_RESULTS) {
+                    let result = allSearchResults.shift();
+                    if (!result) break;
+                    searchResults.push(result);
+                }
+
+                let searchResultsText = searchResults.map((item, index) => {
+                    return `  ${index + 1}. 【${item.name}】: ${item.snippet}`;
+                });
+
+                return '在互联网上搜索到以下内容：\n' + searchResultsText.join('\n');
+            }
+
+            return '未搜索到相关结果';
+        } catch (e: any) {
+            if (e.response?.body?.error) {
+                return '无法访问网络搜索API，错误：' + e.response.body.error.message;
+            } else if (e.message) {
+                return '无法访问网络搜索API，错误：' + e.message;
+            }
+            return '无法访问网络搜索API';
         }
     }
 
@@ -380,8 +445,12 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
         let apiConf = this.getApiConfigById(characterConf.api);
         let summaryRes = await this.doApiRequest(messageList, apiConf);
-        summaryRes.role = 'summary';
-        return summaryRes;
+        
+        return {
+            role: 'summary',
+            message: summaryRes.outputMessage,
+            tokens: summaryRes.totalTokens,
+        };
     }
 
     private buildMessageList(question: string, messageLogList: ChatGPTApiMessage[], characterConf: CharacterConfig,
@@ -439,11 +508,60 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             case 'azure':
                 return `${apiConf.endpoint}/openai/deployments/${apiConf.deployment}/chat/completions?api-version=2023-05-15`;
         }
-        
+
         throw new Error('Unknown API type: ' + apiConf.type);
     }
 
-    public async doApiRequest(messageList: any[], apiConf?: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
+    private getOpenAPIFunctionDefinition(apiType: string = 'openai') {
+        return Object.entries(this.llmFunctions).map(([key, data]) => {
+            let openaiFuncDef: any = {
+                name: key,
+                description: data.description,
+                parameters: data.params,
+            };
+
+            if (apiType === 'qwen') {
+                if (openaiFuncDef.displayName) {
+                    openaiFuncDef.name_for_human = data.displayName;
+                }
+            }
+
+            return openaiFuncDef;
+        });
+    }
+
+    private async handleLLMFunctions(functionName: string, params: any, message: CommonReceivedMessage | null): Promise<FunctionCallingResponse> {
+        let func = this.llmFunctions[functionName];
+        if (!func) {
+            return { message: '未找到对应的功能。' };
+        }
+
+        if (typeof params === 'string') {
+            params = params.trim();
+            if (params.startsWith('{') && params.endsWith('}')) {
+                try {
+                    params = JSON.parse(params);
+                } catch (e) {
+                    return { message: '参数格式错误。' };
+                }
+            }
+        }
+
+        if (func.callback) {
+            const response = await func.callback(params, message);
+            if (typeof response === 'string') {
+                return {
+                    message: response
+                };
+            } else {
+                return response;
+            }
+        }
+
+        return { message: '此功能暂未实现。' };
+    }
+
+    public async doApiRequest(messageList: any[], apiConf?: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiResponse> {
         if (!apiConf) {
             let characterConf = this.getCharacterConfig(this.DEFAULT_CHARACTER);
             apiConf = this.getApiConfigById(characterConf.api);
@@ -458,17 +576,14 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         throw new Error('Unknown API type: ' + apiConf.type);
     }
 
-    public async doOpenAILikeApiRequest(messageList: any[], apiConf: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiMessage> {
-        let modelOpts = Object.fromEntries(Object.entries({
-            model: apiConf.model_options.model,
-            temperature: apiConf.model_options.temperature,
-            top_p: apiConf.model_options.top_p,
-            max_tokens: apiConf.model_options.max_output_tokens,
-            presence_penalty: apiConf.model_options.presence_penalty,
-            frequency_penalty: apiConf.model_options.frequency_penalty,
-        }).filter((data) => data[1]));
+    private async internalOpenAILikeStreamApiRequest(modelOpts: any, messageList: any[], apiConf: ChatCompleteApiConfig,
+        functionCalling = true, onMessage: (chunk: string) => any): Promise<ChatGPTApiResponse> {
 
-        if (onMessage) {
+        if (functionCalling) {
+            modelOpts.functions = this.getOpenAPIFunctionDefinition(apiConf.type);
+        }
+
+        for (let i = 0; i < 5; i ++) { // function calling循环
             let opts: FetchEventSourceInit = {
                 method: 'POST',
                 body: JSON.stringify({
@@ -537,6 +652,8 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             const apiUrl = this.getChatCompleteApiUrl(apiConf);
             this.app.logger.debug(`ChatGPT API 请求地址：${apiUrl}`);
 
+            let unfinished = false;
+
             await fetchEventSource(apiUrl, {
                 ...opts,
                 signal: abortController.signal,
@@ -591,24 +708,48 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
                     try {
                         const data = JSON.parse(eventMessage.data);
-                        if ("choices" in data && data["choices"].length > 0) {
-                            let choice = data["choices"][0];
-                        
-                            var delta_content = choice["delta"];
-                            if (delta_content["content"]) {
-                                var deltaMessage = delta_content["content"];
-                        
-                                // Skip empty lines before content
-                                if (!isStarted) {
-                                    if (deltaMessage.replace("\n", "") == "") {
-                                        return;
-                                    } else {
-                                        isStarted = true;
+                        if ("choices" in data && data.choices.length > 0) {
+                            const choice = data.choices[0];
+                            if (choice.finish_reason === 'function_call') {
+                                // 处理函数调用
+                                // unfinished = true;
+            
+                                // if (choice.message?.function_call) {
+                                //     const funcName = choice.message.function_call.name;
+                                //     const funcParams = firstChoice.message.function_call.arguments;
+            
+                                //     const funcResponse = await this.handleLLMFunctions(funcName, funcParams, message);
+            
+                                //     messageList.push({
+                                //         role: 'assistant',
+                                //         content: messageChunk.join(''),
+                                //         func_call: choice.message.function_call
+                                //     }, {
+                                //         role: 'function',
+                                //         content: funcResponse.message,
+                                //     });
+            
+                                //     if (funcResponse.directOutput) {
+                                //         prevDirectOutput = funcResponse.message;
+                                //     }
+                                // }
+                            } else {
+                                var delta_content = choice.delta;
+                                if (delta_content.content) {
+                                    var deltaMessage = delta_content.content;
+
+                                    // 跳过输出前的空行
+                                    if (!isStarted) {
+                                        if (deltaMessage.replace("\n", "") == "") {
+                                            return;
+                                        } else {
+                                            isStarted = true;
+                                        }
                                     }
+
+                                    buffer += deltaMessage;
+                                    flush();
                                 }
-                        
-                                buffer += deltaMessage;
-                                flush();
                             }
                         }
                         prevEvent = data;
@@ -622,18 +763,46 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             let message = messageChunk.join('');
             let tokens = gptEncode(message).length;
 
-            return {
-                role: 'assistant',
-                message,
-                tokens
-            };
+            messageList = [
+                ...messageList,
+                {
+                    role: 'assistant',
+                    message: message,
+                    tokens: tokens,
+                }
+            ];
+
+            if (!unfinished) {
+                return {
+                    messageList: messageList,
+                    outputMessage: message,
+                    totalTokens: tokens,
+                };
+            }
+        }
+
+        throw new ChatGPTAPIError('API请求失败', 'api_request_failed');
+    }
+
+    public async doOpenAILikeApiRequest(messageList: any[], apiConf: ChatCompleteApiConfig, onMessage?: (chunk: string) => any): Promise<ChatGPTApiResponse> {
+        let modelOpts = Object.fromEntries(Object.entries({
+            model: apiConf.model_options.model,
+            temperature: apiConf.model_options.temperature,
+            top_p: apiConf.model_options.top_p,
+            max_tokens: apiConf.model_options.max_output_tokens,
+            presence_penalty: apiConf.model_options.presence_penalty,
+            frequency_penalty: apiConf.model_options.frequency_penalty,
+        }).filter((data) => data[1]));
+
+        if (onMessage) {
+            return await this.internalOpenAILikeStreamApiRequest(modelOpts, messageList, apiConf, true, onMessage);
         } else {
             let opts: OptionsOfTextResponseBody = {
                 json: {
                     ...modelOpts,
                     messages: messageList,
                 },
-    
+
                 timeout: 30000,
             };
 
@@ -673,10 +842,20 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 typeof res.choices[0].message?.content === 'string') {
                 let completions = res.choices[0].message.content;
                 let completion_tokens = res.usage?.completion_tokens ?? gptEncode(completions).length;
+
+                messageList = [
+                    ...messageList,
+                    {
+                        role: 'assistant',
+                        message: completions,
+                        tokens: completion_tokens,
+                    }
+                ];
+
                 return {
-                    role: 'assistant',
-                    message: completions,
-                    tokens: completion_tokens,
+                    messageList: messageList,
+                    outputMessage: completions,
+                    totalTokens: completion_tokens,
                 };
             }
 
@@ -700,13 +879,13 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         message.markRead();
 
         let content = args.param;
-        
+
         if (usSingleton && this.chatGenerating) {
             let msg = this.messageGroup.generating.nextMessage();
             await message.sendReply(msg ?? '正在生成中，请稍后再试', true);
             return;
         }
-        
+
         let characterConf: CharacterConfig;
         let apiConf: ChatCompleteApiConfig;
         if (character === 'saved') {
@@ -716,7 +895,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 this.app.logger.debug(`ChatGPT API 人物 ${character} 不存在，使用默认人物`);
                 character = 'assistant';
             }
-            
+
             characterConf = this.getCharacterConfig(character);
             apiConf = this.getApiConfigById(characterConf.api);
 
@@ -825,7 +1004,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
             let reqMessageList = this.buildMessageList(content, messageLogList, characterConf, false);
 
-            let replyRes: ChatGPTApiMessage | undefined = undefined;
+            let replyRes: ChatGPTApiResponse | undefined = undefined;
             if (isStream) {
                 // 处理流式输出
                 let onResultMessage = async (chunk: string) => {
@@ -837,45 +1016,38 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 };
 
                 replyRes = await this.doApiRequest(reqMessageList, apiConf, onResultMessage);
-                replyRes.message = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.message) : replyRes.message;
+                replyRes.outputMessage = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.outputMessage) : replyRes.outputMessage;
                 if (this.app.debug) {
                     console.log(replyRes);
                 }
             } else {
                 replyRes = await this.doApiRequest(reqMessageList, apiConf);
-                replyRes.message = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.message) : replyRes.message;
+                replyRes.outputMessage = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.outputMessage) : replyRes.outputMessage;
                 if (this.app.debug) {
                     console.log(replyRes);
                 }
 
                 // 如果检测到对话中认为自己是AI，则再次调用，重写对话
-                if (characterConf.self_suggestion_prompt && this.shouldSelfSuggestion(replyRes.message)) {
+                if (characterConf.self_suggestion_prompt && this.shouldSelfSuggestion(replyRes.outputMessage)) {
                     this.app.logger.debug('需要重写回答');
-                    reqMessageList = this.buildMessageList(replyRes.message, messageLogList, characterConf, true);
+                    reqMessageList = this.buildMessageList(replyRes.outputMessage, messageLogList, characterConf, true);
                     replyRes = await this.doApiRequest(reqMessageList, apiConf);
                     if (this.app.debug) {
                         console.log(replyRes);
                     }
-                    replyRes.message = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.message) : replyRes.message;
+                    replyRes.outputMessage = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.outputMessage) : replyRes.outputMessage;
                 }
 
-                let content = replyRes.message.replace(/\n\n/g, '\n');
+                let content = replyRes.outputMessage.replace(/\n\n/g, '\n');
                 for (let [inputText, replacement] of Object.entries(this.config.output_replace)) {
                     content = content.replace(new RegExp(inputText, 'g'), replacement);
                 }
-    
+
                 await message.sendReply(content, true);
             }
 
             if (replyRes) {
-                messageLogList.push(
-                    {
-                        role: 'user',
-                        message: content,
-                        tokens: questionTokens,
-                    },
-                    replyRes
-                );
+                messageLogList = replyRes.messageList;
                 await message.session.chat.set(this.SESSION_KEY_API_CHAT_LOG, messageLogList, apiConf.memory_expire);
             }
         } catch (err: any) {

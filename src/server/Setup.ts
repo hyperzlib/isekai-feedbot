@@ -1,5 +1,6 @@
 import Handlebars from "handlebars";
 import { excerpt, getCurrentDate } from "./utils";
+import Yaml from 'yaml';
 
 export class Setup {
     public static async initHandlebars() {
@@ -17,5 +18,9 @@ export class Setup {
         });
 
         Handlebars.registerHelper('currentDate', getCurrentDate);
+
+        Handlebars.registerHelper('dump', (obj) => {
+            return Yaml.stringify(obj);
+        });
     }
 }

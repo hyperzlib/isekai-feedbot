@@ -24,13 +24,15 @@ export class StorageManager {
         }
 
         // 如果已生成则直接返回
+        let storages: RobotStorage;
         if (robotId in this.robotStorages) {
-            return this.robotStorages[robotId];
+            storages = this.robotStorages[robotId];
+        } else {
+            storages = new RobotStorage(this.app, this.config, robotId);
+            this.robotStorages[robotId] = storages;
         }
 
-        const storages = new RobotStorage(this.app, this.config, robotId);
-
-        await storages.initialize();
+        await storages.with();
 
         return storages;
     }

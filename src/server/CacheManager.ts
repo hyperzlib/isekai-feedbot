@@ -3,7 +3,7 @@ import { redisStore } from "cache-manager-ioredis-yet";
 
 import App from "./App";
 import { CacheConfig as CacheConfig } from "./types/config";
-import { RateLimitError } from "./error/errors";
+import { RateLimitError } from "../api/error/errors";
 import micromatch from "micromatch";
 
 export class CacheManager {
@@ -104,6 +104,10 @@ export class CacheStore implements Cache {
         if (key.includes('*')) {
             const keys = await this.rootStore.store.keys();
             let matchedKeys = micromatch(keys, this.prefix + key);
+            if (matchedKeys.length === 0) {
+                return;
+            }
+            
             return await this.rootStore.store.mdel(...matchedKeys);
         }
         return await this.rootStore.del(this.prefix + key);

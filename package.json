@@ -20,11 +20,13 @@
     "cache-manager": "^5.4.0",
     "cache-manager-ioredis-yet": "^1.2.2",
     "chokidar": "^3.6.0",
+    "cron": "^3.1.7",
     "decoders": "^1.25.5",
     "got": "^11.8.6",
     "gpt-3-encoder": "^1.1.4",
     "handlebars": "^4.7.8",
     "hpagent": "^1.2.0",
+    "jsdom": "^24.1.0",
     "koa": "^2.15.2",
     "koa-body": "^6.0.1",
     "koa-router": "^10.1.1",
@@ -45,6 +47,7 @@
     "yaml": "^1.10.2"
   },
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
     "@types/koa": "^2.15.0",
     "@types/koa-router": "^7.4.8",
     "@types/koa-websocket": "^5.0.10",

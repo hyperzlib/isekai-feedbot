@@ -18,6 +18,8 @@ import { Logger } from './utils/Logger';
 import { PluginController } from '#ibot-api/PluginController';
 import * as Utils from './utils';
 import { RoleManager } from './RoleManager';
+import { CommonSendMessage, MessageChunk } from './message/Message';
+import { ChatIdentity } from './message/Sender';
 
 export * from './utils/contextHooks';
 
@@ -181,5 +183,25 @@ export default class App {
      */
     public getPluginInstance<T extends PluginController = PluginController>(pluginId: string): PluginInstance<T> | null {
         return this.plugin.getPluginInstance<T>(pluginId) ?? null;
+    }
+
+    /**
+     * 发送消息到指定目标
+     * @param chatIdentity 
+     * @param message 
+     */
+    public async sendMessage(chatIdentity: ChatIdentity, message: string | MessageChunk[]): Promise<CommonSendMessage> {
+        if (typeof message === 'string') {
+            message = [{
+                type: ['text'],
+                text: message,
+                data: undefined,
+            }];
+        }
+
+        let sendMessage = new CommonSendMessage(chatIdentity.robot, chatIdentity.type, chatIdentity, message);
+        sendMessage = await chatIdentity.robot.sendMessage(sendMessage);
+
+        return sendMessage;
     }
 }

@@ -24,3 +24,24 @@ export class PermissionDeniedError extends Error {
         this.requiredPermission = requiredPermission;
     }
 }
+
+export class ParseError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ParseError';
+    }
+}
+
+export class NotFoundError extends Error {
+    constructor(message: string, resourceId?: string) {
+        super(message);
+        this.name = 'NotFoundError';
+    }
+}
+
+export class PluginDependencyError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'PluginDependencyError';
+    }
+}

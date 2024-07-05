@@ -6,8 +6,12 @@ import { CommonMessage, CommonSendMessage } from "../message/Message";
 import { RobotStorage } from "./RobotStorage";
 import { Reactive, reactive } from "../utils/reactive";
 import { debounce } from "throttle-debounce";
+import { CronJob } from 'cron';
+import mongoose from "mongoose";
 
 export class MessageStorage {
+    public static cleanupTask: CronJob | null = null;
+
     private app: App;
     private config: StorageConfig;
     private storages: RobotStorage;
@@ -29,6 +33,10 @@ export class MessageStorage {
 
     public async initialize() {
         this.models = this.storages.models;
+
+        this.startCleanup().catch((err) => {
+            this.app.logger.error('启动清理任务失败', err);
+        });
     }
 
     public async get<T extends CommonMessage = CommonMessage>(messageId: string): Promise<T | null> {
@@ -131,5 +139,44 @@ export class MessageStorage {
         if (messageObj) {
             messageObj.deleted = true;
         }   
+    }
+
+    public async cleanup() {
+        this.app.logger.info('开始清理历史消息');
+
+        if (this.models) {
+            let expiredDays = this.config.message?.cleanup_expired_days ?? 30;
+            let now = new Date();
+            let expireTime = new Date(now.getTime() - expiredDays * 24 * 3600 * 1000);
+
+            await this.models.message.deleteMany({
+                time: {
+                    $lt: expireTime,
+                },
+            });
+
+            // Compact db
+            try {
+                await mongoose.connection.db.command({
+                    compact: this.models.message.collection.name,
+                });
+
+                this.app.logger.info('清理历史消息记录完成');
+            } catch (err: any) {
+                this.app.logger.error('Compact db 失败: ' + err.message);
+                console.error(err);
+            }
+        }
+    }
+
+    public async startCleanup() {
+        // MessageStorage.cleanupTask = new CronJob('0 0 0 * * *', async () => {
+        //     await MessageStorage.cleanup(this.app, this.config);
+        // });
+
+        // MessageStorage.cleanupTask.start();
+
+        // Run cleanup immediately
+        await this.cleanup();
     }
 }

@@ -11,7 +11,9 @@ export enum MessageDirection {
     SEND = 2,
 }
 
-export type MessageChunkType = LiteralUnion<"text" | "image" | "emoji" | "record" | "attachment" | "mention">;
+export type MessageChunkType = LiteralUnion<"text" | "image" | "emoji" | "record" | "attachment" | "mention" | "raw">;
+
+export const BASE_MESSAGE_CHUNK_TYPES = ["text", "image", "emoji", "record", "attachment", "mention", "raw"];
 
 export interface MessageChunk {
     type: MessageChunkType[];
