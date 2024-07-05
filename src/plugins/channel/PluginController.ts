@@ -11,7 +11,7 @@ import { MessageChunk } from "#ibot/message/Message";
 import { ChannelCommandController } from "./ChannelCommandController";
 
 export type ChannelSubscribeList = {
-    [channelId: string]: ChatIdentity[]
+    [channelId: string]: string[]
 };
 
 export type ChannelTypeSubscribeList = {
@@ -81,11 +81,10 @@ export default class ChannelFrameworkController extends PluginController<typeof 
         await this.createdChannelsCache.initialize(true);
 
         // Create per-chat subscribed channels list
-        for (let channelType in this.subscribeConfig.value) {
+        for (const channelType in this.subscribeConfig.value) {
             const channelTypeInfo = this.subscribeConfig.value[channelType];
-            for (let channelId in channelTypeInfo) {
-                for (let chatIdentity of channelTypeInfo[channelId]) {
-                    const chatIdentityStr = this.chatIdentityToString(chatIdentity);
+            for (const channelId in channelTypeInfo) {
+                for (const chatIdentityStr of channelTypeInfo[channelId]) {
                     if (!this.chatSubscribeList[chatIdentityStr]) {
                         this.chatSubscribeList[chatIdentityStr] = [];
                     }
@@ -226,16 +225,16 @@ export default class ChannelFrameworkController extends PluginController<typeof 
      * @param channelId 
      * @returns 
      */
-    public async getChannelInfo(channelType: string, channelId: string): Promise<ChannelInfo> {
+    public async getChannelInfo(channelType: string, channelId: string): Promise<ChannelInfo | null> {
         if (!(channelType in this.channelTypeList)) {
-            throw new NotFoundError('Channel type not found', channelType);
+            return null;
         }
 
         const channelTypeInfo = this.channelTypeList[channelType];
         let channelInfo = await channelTypeInfo.getChannelInfo(channelId);
 
         if (!channelInfo) {
-            throw new NotFoundError('Channel not found', channelId);
+            return null;
         }
 
         return channelInfo;
@@ -297,9 +296,9 @@ export default class ChannelFrameworkController extends PluginController<typeof 
         let successCount: number = 0;
         let errors: Error[] = [];
 
-        for (const chatIdentity of targetList) {
+        for (const chatIdentityStr of targetList) {
             try {
-                const chatIdentityStr = this.chatIdentityToString(chatIdentity);
+                const chatIdentity = this.parseChatIdentityFromString(chatIdentityStr);
                 const robotType = chatIdentity.robot.type;
                 let messageChunks: MessageChunk[] = [];
 
@@ -332,7 +331,7 @@ export default class ChannelFrameworkController extends PluginController<typeof 
                 errors.push(err);
 
                 if (this.app.debug) { // Show error message in debug mode
-                    this.app.logger.error(`Failed to send push message to ${this.chatIdentityToString(chatIdentity)}: ${err.message}`);
+                    this.app.logger.error(`Failed to send push message to ${chatIdentityStr}: ${err.message}`);
                     console.error(err);
                 }
             }
@@ -354,6 +353,8 @@ export default class ChannelFrameworkController extends PluginController<typeof 
      */
     public async addChannelSubscribe(channelType: string, channelId: string, chatIdentity: ChatIdentity) {
         const channelTypeInfo = this.channelTypeList[channelType];
+        const channelUrl = channelType + '/' + channelId;
+        
         if (!channelTypeInfo) {
             throw new NotFoundError('Channel type not found', channelType);
         }
@@ -386,11 +387,16 @@ export default class ChannelFrameworkController extends PluginController<typeof 
             this.subscribeConfig.value[channelType][channelId] = [];
         }
 
-        this.subscribeConfig.value[channelType][channelId].push(chatIdentity);
+        this.subscribeConfig.value[channelType][channelId].push(chatIdentityStr);
 
         let subscribedCount = this.subscribeConfig.value[channelType][channelId].length;
 
         this.subscribeConfig.lazySave();
+
+        if (!this.createdChannelsCache.value.includes(channelUrl)) { // Add to created channels cache
+            this.createdChannelsCache.value.push(channelUrl);
+            this.createdChannelsCache.lazySave();
+        }
 
         try {
             this.event.emit('channel/subscribe', {
@@ -414,6 +420,7 @@ export default class ChannelFrameworkController extends PluginController<typeof 
      */
     public async removeChannelSubscribe(channelType: string, channelId: string, chatIdentity: ChatIdentity) {
         const chatIdentityStr = this.chatIdentityToString(chatIdentity);
+        const channelUrl = channelType + '/' + channelId;
 
         // Remove from chat subscribe list
         if (this.chatSubscribeList[chatIdentityStr]) {
@@ -424,7 +431,7 @@ export default class ChannelFrameworkController extends PluginController<typeof 
         // Remove from channel subscribe list
         if (this.subscribeConfig.value[channelType] && this.subscribeConfig.value[channelType][channelId]) {
             this.subscribeConfig.value[channelType][channelId] = this.subscribeConfig.value[channelType][channelId]
-                .filter((identity) => this.chatIdentityToString(identity) !== chatIdentityStr);
+                .filter((identity) => identity !== chatIdentityStr);
 
             let subscribedCount = this.subscribeConfig.value[channelType][channelId].length;
 
@@ -447,6 +454,11 @@ export default class ChannelFrameworkController extends PluginController<typeof 
                     const channelTypeInfo = this.channelTypeList[channelType];
                     this.logger.info(`正在清理推送频道：${channelType}/${channelId}`);
                     await channelTypeInfo?.cleanupChannel?.(channelId);
+
+                    if (this.createdChannelsCache.value.includes(channelUrl)) { // Remove from created channels cache
+                        this.createdChannelsCache.value = this.createdChannelsCache.value.filter((item) => item !== channelUrl);
+                        this.createdChannelsCache.lazySave();
+                    }
                 }
             } catch (err: any) {
                 this.logger.error(`Cannot emit event for channel unsubscribe: ${err.message}`);

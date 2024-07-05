@@ -217,6 +217,7 @@ export class EventManager {
                 // 检测用户是否有使用此控制器的权限
                 const ruleName = `${eventScope.pluginId}/${eventScope.scopeName}`;
                 if (meta.userRules && !meta.userRules.includes(ruleName)) {
+                    this.app.logger.debug(`用户权限不足，用户权限：[${meta.userRules.join(', ')}]，所需权限：[${ruleName}]`);
                     continue;
                 }
                 

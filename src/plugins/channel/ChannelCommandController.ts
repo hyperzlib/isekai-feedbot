@@ -25,8 +25,9 @@ export class ChannelCommandController {
     
                 let channelType = context.param;
                 let channelId = 'main';
-                if (channelId.indexOf('/') !== -1) {
-                    [channelType, channelId] = splitPrefix(channelId, '/');
+
+                if (channelType.indexOf('/') !== -1) {
+                    [channelType, channelId] = splitPrefix(channelType, '/');
                 }
 
                 return this.addSubscribe(channelType, channelId, message);
@@ -42,8 +43,9 @@ export class ChannelCommandController {
 
                 let channelType = context.param;
                 let channelId = 'main';
-                if (channelId.indexOf('/') !== -1) {
-                    [channelType, channelId] = splitPrefix(channelId, '/');
+
+                if (channelType.indexOf('/') !== -1) {
+                    [channelType, channelId] = splitPrefix(channelType, '/');
                 }
 
                 return this.removeSubscribe(channelType, channelId, message);
@@ -128,8 +130,11 @@ export class ChannelCommandController {
             await this.mainController.addChannelSubscribe(channelType, channelId, senderIdentity);
 
             let channelInfo = await this.mainController.getChannelInfo(channelType, channelId);
-
-            await message.sendReply(`已订阅频道：${channelInfo.title}`);
+            if (channelInfo) {
+                await message.sendReply(`已订阅频道：${channelInfo.title}`);
+            } else {
+                await message.sendReply(`已订阅频道：${channelType}/${channelId}`);
+            }
         } catch (err: any) {
             if (err.name === 'NotFoundError') {
                 switch (err.message) {
@@ -142,6 +147,8 @@ export class ChannelCommandController {
                 }
             }
             
+            this.mainController.logger.error('订阅频道时出现错误：' + err.message);
+            console.error(err);
             await message.sendReply('订阅频道时出现错误：' + err.message);
         }
     }
@@ -159,7 +166,11 @@ export class ChannelCommandController {
 
             await this.mainController.removeChannelSubscribe(channelType, channelId, senderIdentity);
 
-            await message.sendReply(`已退订频道：${channelInfo.title}`);
+            if (channelInfo) {
+                await message.sendReply(`已退订频道：${channelInfo.title}`);
+            } else {
+                await message.sendReply(`已退订频道：${channelType}/${channelId}`);
+            }
         } catch (err: any) {
             if (err.name === 'NotFoundError') {
                 switch (err.message) {
@@ -201,6 +212,7 @@ export class ChannelCommandController {
             let channelInfo = await this.mainController.getChannelInfo(channelType, channelId);
             if (!channelInfo) {
                 await message.sendReply(`频道未找到：${channelType}/${channelId}`);
+                return;
             }
 
             let msgContent = `[${channelType}/${channelId}] ${channelInfo.title}:\n${channelInfo.description ?? '该频道没有详细描述'}`;

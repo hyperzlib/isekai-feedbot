@@ -10,7 +10,6 @@ import ChannelFrameworkController, { ChannelInfo } from '../channel/PluginContro
 import { prepareDir } from '#ibot/utils';
 
 const defaultConfig = {};
-export const PUSHER_CHANNEL_PREFIX = 'pusher';
 
 export type PusherChannelInfoConfig = {
     id: string,
@@ -55,7 +54,7 @@ export default class PusherChannelController extends PluginController<typeof def
         }
         
         channelPlugin.registerChannelType({
-            id: PUSHER_CHANNEL_PREFIX,
+            id: 'pusher',
             title: "Pusher 推送",
             help: "支持从 Pusher 接收事件推送，请在模板中使用 Pusher 推送的对象中的参数。",
             templates: [
@@ -143,7 +142,7 @@ export default class PusherChannelController extends PluginController<typeof def
 
         // 加载已经订阅的 channel
         for (let channelConfig of config.channels) {
-            let channelUrl = PUSHER_CHANNEL_PREFIX + `/${pusherId}/${channelConfig.id}`;
+            let channelUrl = `${pusherId}/${channelConfig.id}`;
             if (this.subscribedChannels.value.includes(channelUrl)) {
                 await this.initChannel(channelUrl);
             }
@@ -162,7 +161,7 @@ export default class PusherChannelController extends PluginController<typeof def
         this.pusherConfigMap.delete(pusherId);
         this.pusherInstances.delete(pusherId);
 
-        let channelUrlPrefix = PUSHER_CHANNEL_PREFIX + `/${pusherId}/`;
+        let channelUrlPrefix = `${pusherId}/`;
         for (let channelUrl of this.createdChannelMap.keys()) {
             if (channelUrl.startsWith(channelUrlPrefix)) {
                 this.createdChannelMap.delete(channelUrl);
@@ -185,22 +184,22 @@ export default class PusherChannelController extends PluginController<typeof def
     }
 
     public parsePusherChannelUrl(channelUrl: string): { pusherId: string, channelId: string } | null {
-        if (!channelUrl.startsWith(PUSHER_CHANNEL_PREFIX + '/')) {
-            return null;
-        }
-
         let parts = channelUrl.split('/');
-        if (parts.length !== 3) {
+        if (parts.length !== 2) {
             return null;
         }
 
         return {
-            pusherId: parts[1],
-            channelId: parts[2]
+            pusherId: parts[0],
+            channelId: parts[1]
         };
     }
 
     public async initChannel(channelUrl: string) {
+        if (this.createdChannelMap.has(channelUrl)) { // 已创建
+            return await this.getChannelInfo(channelUrl);
+        }
+
         let channelPath = this.parsePusherChannelUrl(channelUrl);
         if (!channelPath) {
             throw new ParseError("Invalid channel URL");
@@ -235,6 +234,9 @@ export default class PusherChannelController extends PluginController<typeof def
             channelUrl,
         });
 
+        this.subscribedChannels.value.push(channelUrl);
+        this.subscribedChannels.lazySave();
+
         return await this.getChannelInfo(channelUrl);
     }
 
@@ -266,7 +268,7 @@ export default class PusherChannelController extends PluginController<typeof def
 
     public async onData(pusherId: string, channelId: string, data: any) {
         data._data = { ...data }; // 增加用于dump的数据
-        const channelUrl = PUSHER_CHANNEL_PREFIX + `/${pusherId}/${channelId}`;
+        const channelUrl = `${pusherId}/${channelId}`;
         this.channelPlugin.pushMessage(channelUrl, data);
     }
 }

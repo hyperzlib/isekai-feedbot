@@ -103,7 +103,8 @@ export class CacheStore implements Cache {
     public async del(key: string): Promise<void> {
         if (key.includes('*')) {
             const keys = await this.rootStore.store.keys();
-            let matchedKeys = micromatch(keys, this.prefix + key);
+            let matchedKeys = micromatch(keys, key);
+            
             if (matchedKeys.length === 0) {
                 return;
             }
