@@ -22,6 +22,7 @@
     "chokidar": "^3.6.0",
     "cron": "^3.1.7",
     "decoders": "^1.25.5",
+    "fast-xml-parser": "^4.4.0",
     "got": "^11.8.6",
     "gpt-3-encoder": "^1.1.4",
     "handlebars": "^4.7.8",

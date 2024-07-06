@@ -304,6 +304,10 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
                 data: { id: chunk.data.id }
             });
         } else if (chunk.type.includes('image')) {
+            if (chunk.data.url.startsWith('asset://')) {
+                // TODO: 将图片转换为base64
+            }
+
             msgChunk.push({
                 type: 'image',
                 data: {

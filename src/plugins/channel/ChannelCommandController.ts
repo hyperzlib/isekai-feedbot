@@ -372,21 +372,22 @@ export class ChannelCommandController {
         // 分离参数
         let argLines = args.split('\n');
         let firstLineArgs = argLines[0].split(' ');
-        let channelType = '';
+        let channelUrl = '';
         if (firstLineArgs.length > 1) {
-            channelType = firstLineArgs.shift()!;
+            channelUrl = firstLineArgs.shift()!;
             argLines[0] = firstLineArgs.join(' ');
         } else {
-            channelType = firstLineArgs[0];
+            channelUrl = firstLineArgs[0];
             argLines.shift();
         }
 
         let template = argLines.join('\n');
 
         // 检测频道类型
+        let channelType = channelUrl;
         let channelId = '*';
-        if (channelType.includes('/')) {
-            [channelType, channelId] = splitPrefix(args, '/');
+        if (channelUrl.includes('/')) {
+            [channelType, channelId] = splitPrefix(channelUrl, '/');
         }
 
         if (!senderIdentity) {
@@ -400,8 +401,20 @@ export class ChannelCommandController {
             return;
         }
 
-        this.mainController.setCustomTemplate(senderIdentity, channelType, channelId, template);
+        if (channelId !== '*') { // 检测频道是否存在
+            let channelInfo = await channelTypeInfo.getChannelInfo(channelId);
+            if (!channelInfo) {
+                await message.sendReply(`频道未找到：${channelType}/${channelId}，你可能需要先订阅此频道。`);
+                return;
+            }
 
-        await message.sendReply(`频道 ${channelType}/${channelId} 的推送模板已设置`);
+            this.mainController.setCustomTemplate(senderIdentity, channelType, channelId, template);
+
+            await message.sendReply(`频道 ${channelInfo.title} 的推送模板已设置`);
+        } else {
+            this.mainController.setCustomTemplate(senderIdentity, channelType, channelId, template);
+
+            await message.sendReply(`频道类型 ${channelTypeInfo.title} 的推送模板已设置`);
+        }
     }
 }

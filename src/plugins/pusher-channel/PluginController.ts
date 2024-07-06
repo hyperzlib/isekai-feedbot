@@ -24,16 +24,15 @@ export type PusherChannelInfo = PusherChannelInfoConfig & {
 };
 
 export type PusherConfigType = {
-    app_id: string,
     key: string,
-    secret?: string,
     cluster: string,
     channels: PusherChannelInfoConfig[],
 };
 
 export default class PusherChannelController extends PluginController<typeof defaultConfig> {
     /** 已有订阅的的频道列表 */
-    public subscribedChannels!: ReactiveConfig<string[]>;
+    public subscribedChannelsConfig!: ReactiveConfig<string[]>;
+    public subscribedChannels: Set<string> = new Set();
 
     /** Pusher配置文件表 */
     public pusherConfigMap = new Map<string, PusherConfigType>();
@@ -77,8 +76,9 @@ export default class PusherChannelController extends PluginController<typeof def
 
     public async initConfigs() {
         const createdChannelsPath = resolve(this.getConfigPath(), '_created_channels.yaml');
-        this.subscribedChannels = new ReactiveConfig<string[]>(createdChannelsPath, []);
-        await this.subscribedChannels.initialize(true);
+        this.subscribedChannelsConfig = new ReactiveConfig<string[]>(createdChannelsPath, []);
+        this.subscribedChannelsConfig.on('data', value => this.subscribedChannels = new Set(value));
+        await this.subscribedChannelsConfig.initialize(true);
 
         const configPath = resolve(this.getConfigPath(), 'channels');
         prepareDir(configPath);
@@ -120,6 +120,8 @@ export default class PusherChannelController extends PluginController<typeof def
             pusher.unbind_all();
             pusher.disconnect();
         }
+
+        await this.subscribedChannelsConfig.destory();
     }
     
     public async loadConfig(path: string) {
@@ -143,7 +145,7 @@ export default class PusherChannelController extends PluginController<typeof def
         // 加载已经订阅的 channel
         for (let channelConfig of config.channels) {
             let channelUrl = `${pusherId}/${channelConfig.id}`;
-            if (this.subscribedChannels.value.includes(channelUrl)) {
+            if (this.subscribedChannels.has(channelUrl)) {
                 await this.initChannel(channelUrl);
             }
         }
@@ -234,8 +236,11 @@ export default class PusherChannelController extends PluginController<typeof def
             channelUrl,
         });
 
-        this.subscribedChannels.value.push(channelUrl);
-        this.subscribedChannels.lazySave();
+        if (!this.subscribedChannels.has(channelUrl)) {
+            this.subscribedChannels.add(channelUrl);
+            this.subscribedChannelsConfig.value = Array.from(this.subscribedChannels);
+            this.subscribedChannelsConfig.lazySave();
+        }
 
         return await this.getChannelInfo(channelUrl);
     }
@@ -269,6 +274,6 @@ export default class PusherChannelController extends PluginController<typeof def
     public async onData(pusherId: string, channelId: string, data: any) {
         data._data = { ...data }; // 增加用于dump的数据
         const channelUrl = `${pusherId}/${channelId}`;
-        this.channelPlugin.pushMessage(channelUrl, data);
+        this.channelPlugin.pushMessage('pusher', channelUrl, data);
     }
 }

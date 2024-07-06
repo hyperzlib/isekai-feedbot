@@ -46,6 +46,7 @@ export class ReactiveConfig<T extends {}> {
 
     public on(eventName: 'load', listener: () => void): void
     public on(eventName: 'change', listener: (newValue: T, oldValue: T) => void): void
+    public on(eventName: 'data', listener: (value: T) => void): void
     public on(eventName: 'saved', listener: (value: T) => void): void
     public on(eventName: string, listener: (...args: any[]) => void) {
         this.eventEmitter.on(eventName, listener);
@@ -62,6 +63,7 @@ export class ReactiveConfig<T extends {}> {
 
     public async destory() {
         this.fileWatcher?.close();
+        this.eventEmitter.removeAllListeners();
     }
 
     public initWatcher() {
@@ -103,6 +105,7 @@ export class ReactiveConfig<T extends {}> {
             } else {
                 this.eventEmitter.emit('load');
             }
+            this.eventEmitter.emit('data', this._value);
             this._loaded = true;
             return true;
         } else {

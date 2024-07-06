@@ -19,6 +19,9 @@ dependencies:
   decoders:
     specifier: ^1.25.5
     version: 1.25.5
+  fast-xml-parser:
+    specifier: ^4.4.0
+    version: 4.4.0
   got:
     specifier: ^11.8.6
     version: 11.8.6
@@ -1730,8 +1733,8 @@ packages:
     resolution: {integrity: sha512-Ia0sQNrMPXXkqVFt6w6M1n1oKo3NfKs+mvaV811Jwir7vAk9a6PVV9VPYf6X3BU97QiLEmuW3uXH9u87zDFfdw==}
     dev: true
 
-  /fast-xml-parser@4.3.6:
-    resolution: {integrity: sha512-M2SovcRxD4+vC493Uc2GZVcZaj66CCJhWurC4viynVSTvrpErCShNcDz1lAho6n9REQKvL/ll4A4/fw6Y9z8nw==}
+  /fast-xml-parser@4.4.0:
+    resolution: {integrity: sha512-kLY3jFlwIYwBNDojclKsNAC12sfD6NwW74QB2CoNGPvtVxjliYehVunB3HYyNi+n4Tt1dAcgwYvmKF/Z18flqg==}
     hasBin: true
     dependencies:
       strnum: 1.0.5
@@ -5100,7 +5103,7 @@ packages:
       '@buttercup/fetch': 0.2.1
       base-64: 1.0.0
       byte-length: 1.0.2
-      fast-xml-parser: 4.3.6
+      fast-xml-parser: 4.4.0
       he: 1.2.0
       hot-patcher: 2.0.1
       layerr: 2.0.1

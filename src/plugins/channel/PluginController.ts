@@ -3,12 +3,13 @@ import Handlebars from "handlebars";
 import { PluginController } from "#ibot-api/PluginController";
 import { NotFoundError, ParseError } from "#ibot-api/error/errors";
 import { ChatIdentity } from "#ibot/message/Sender";
-import { arrayDiff, parseMessageChunksFromXml, splitPrefix } from "#ibot/utils";
+import { arrayDiff, asleep, hashMd5, parseMessageChunksFromXml, setDiff, splitPrefix } from "#ibot/utils";
 import { ReactiveConfig } from "#ibot/utils/ReactiveConfig";
 import { resolve } from "path";
 import { OnSubscribeChannelParams } from "./events";
 import { MessageChunk } from "#ibot/message/Message";
 import { ChannelCommandController } from "./ChannelCommandController";
+import { randomInt } from "crypto";
 
 export type ChannelSubscribeList = {
     [channelId: string]: string[]
@@ -61,8 +62,12 @@ export default class ChannelFrameworkController extends PluginController<typeof 
     private commandController: ChannelCommandController = new ChannelCommandController(this.app, this);
 
     private subscribeConfig!: ReactiveConfig<ChannelTypeSubscribeList>;
+
     private customTplConfig!: ReactiveConfig<CustomTemplateMap>;
+
     private createdChannelsCache!: ReactiveConfig<string[]>;
+    private createdChannels: Set<string> = new Set();
+
     public chatSubscribeList: Record<string, [string, string][]> = {};
 
     private subscribeLoaded: boolean = false;
@@ -78,6 +83,7 @@ export default class ChannelFrameworkController extends PluginController<typeof 
 
         const createdChannelsCachePath = resolve(this.getConfigPath(), '_created_channels.yaml');
         this.createdChannelsCache = new ReactiveConfig<string[]>(createdChannelsCachePath, []);
+        this.createdChannelsCache.on('data', (data) => this.createdChannels = new Set(data));
         await this.createdChannelsCache.initialize(true);
 
         // Create per-chat subscribed channels list
@@ -99,18 +105,16 @@ export default class ChannelFrameworkController extends PluginController<typeof 
     }
 
     public async postInit() {
-        let currentChannels: string[] = [];
+        let currentChannels = new Set<string>();
         // 获取当前已订阅的所有频道列表
         for (let channelList of Object.values(this.chatSubscribeList)) {
             for (let [channelType, channelId] of channelList) {
                 const channelPath = channelType + '/' + channelId;
-                if (!currentChannels.includes(channelPath)) {
-                    currentChannels.push(channelPath);
-                }
+                currentChannels.add(channelPath);
             }
         }
 
-        let diffResult = arrayDiff(this.createdChannelsCache.value, currentChannels);
+        let diffResult = setDiff(this.createdChannels, currentChannels);
 
         // 创建新订阅的频道
         for (let channelPath of diffResult.added) {
@@ -131,6 +135,12 @@ export default class ChannelFrameworkController extends PluginController<typeof 
                 await channelTypeInfo.cleanupChannel?.(channelId);
             }
         }
+    }
+
+    public async destroy(): Promise<void> {
+        await this.subscribeConfig.destory();
+        await this.customTplConfig.destory();
+        await this.createdChannelsCache.destory();
     }
 
     public async getDefaultConfig() {
@@ -268,22 +278,29 @@ export default class ChannelFrameworkController extends PluginController<typeof 
 
     /**
      * Send a push message from a channel
-     * @param channelId Channel ID
+     * @param channelType Channel type
+     * @param channelId Channel id
      * @param pushData Data to send
      * @param tag Tag for the message (for deduplication)
      */
-    public pushMessage(channelId: string, pushData: Record<string, any>, tag: string = 'default'): PushMessageResponse {
-        const [channelType, channelName] = splitPrefix(channelId, '/');
-
+    public async pushMessage(channelType: string, channelId: string, pushData: Record<string, any>, tag: string = 'default'): Promise<PushMessageResponse> {
         if (!(channelType in this.channelTypeList)) {
-            throw new NotFoundError('Channel type not found', channelType);
+            this.logger.error(`Channel type not found: ${channelType}`);
+            return {
+                isSuccess: false,
+                successCount: 0,
+                errors: [
+                    new NotFoundError(`Channel type not found: ${channelType}`, `channelType:${channelType}`),
+                ]
+            }
         }
 
         const channelTypeInfo = this.channelTypeList[channelType];
 
-        let robotTypeMessageCache: Record<string, MessageChunk[]> = {};
+        let robotTypeMessageCache: Record<string, MessageChunk[][]> = {};
+        let tplHashMessageCache: Record<string, MessageChunk[][]> = {};
 
-        const targetList = this.getSubscribedChats(channelType, channelName);
+        const targetList = this.getSubscribedChats(channelType, channelId);
 
         if (targetList.length === 0) {
             return {
@@ -300,14 +317,23 @@ export default class ChannelFrameworkController extends PluginController<typeof 
             try {
                 const chatIdentity = this.parseChatIdentityFromString(chatIdentityStr);
                 const robotType = chatIdentity.robot.type;
-                let messageChunks: MessageChunk[] = [];
+                let messagesContent: MessageChunk[][] = [];
 
-                if (chatIdentityStr in this.customTplConfig.value) { // 如果存在自定义模板
-                    const render = Handlebars.compile(this.customTplConfig.value[chatIdentityStr]);
-                    let messageText = render(pushData);
-                    messageChunks = parseMessageChunksFromXml(messageText);
-                } else if (robotType in robotTypeMessageCache) { // 命中缓存
-                    messageChunks = robotTypeMessageCache[robotType];
+                let customTemplate = this.getCustomTemplate(chatIdentity, channelType, channelId);
+                if (customTemplate) { // 如果存在自定义模板
+                    let tplHash = hashMd5(customTemplate);
+
+                    if (tplHash in tplHashMessageCache) { // 缓存中已有解析后的消息
+                        messagesContent = tplHashMessageCache[tplHash];
+                    } else {
+                        const render = Handlebars.compile(customTemplate);
+                        let messageText = render(pushData);
+                        messagesContent = parseMessageChunksFromXml(messageText, true);
+
+                        tplHashMessageCache[tplHash] = messagesContent; // 缓存结果
+                    }
+                } else if (robotType in robotTypeMessageCache) { // 缓存中已有解析后的消息
+                    messagesContent = robotTypeMessageCache[robotType];
                 } else { // 根据机器人类型选择模板
                     let tpl = this.getActualPushTemplate(chatIdentity, channelTypeInfo.templates);
                     if (!tpl) {
@@ -315,17 +341,27 @@ export default class ChannelFrameworkController extends PluginController<typeof 
                     }
 
                     if (tpl.robotType && '*' in robotTypeMessageCache) { // 调用缓存通用模板
-                        messageChunks = robotTypeMessageCache['*'];
+                        messagesContent = robotTypeMessageCache['*'];
                     } else {
-                        const render = Handlebars.compile(tpl.template);
-                        let messageText = render(pushData);
-                        messageChunks = parseMessageChunksFromXml(messageText);
+                        let tplHash = hashMd5(tpl.template);
+                        if (tplHash in tplHashMessageCache) { // 缓存中已有解析后的消息
+                            messagesContent = tplHashMessageCache[tplHash];
+                        } else {
+                            const render = Handlebars.compile(tpl.template);
+                            let messageText = render(pushData);
+                            messagesContent = parseMessageChunksFromXml(messageText, true);
 
-                        robotTypeMessageCache[robotType] = messageChunks; // 缓存结果
+                            tplHashMessageCache[tplHash] = messagesContent;
+                        }
+
+                        robotTypeMessageCache[robotType] = messagesContent; // 缓存结果
                     }
                 }
-
-                this.app.sendMessage(chatIdentity, messageChunks);
+                
+                for (let messageChunks of messagesContent) {
+                    await this.app.sendMessage(chatIdentity, messageChunks);
+                    asleep(randomInt(500, 1000)) // 随机等待一段时间
+                }
                 successCount ++;
             } catch (err: any) {
                 errors.push(err);
@@ -393,8 +429,10 @@ export default class ChannelFrameworkController extends PluginController<typeof 
 
         this.subscribeConfig.lazySave();
 
-        if (!this.createdChannelsCache.value.includes(channelUrl)) { // Add to created channels cache
-            this.createdChannelsCache.value.push(channelUrl);
+        if (!this.createdChannels.has(channelUrl)) { // Add to created channels cache
+            this.createdChannels.add(channelUrl);
+
+            this.createdChannelsCache.value = Array.from(this.createdChannels);
             this.createdChannelsCache.lazySave();
         }
 
@@ -455,8 +493,9 @@ export default class ChannelFrameworkController extends PluginController<typeof 
                     this.logger.info(`正在清理推送频道：${channelType}/${channelId}`);
                     await channelTypeInfo?.cleanupChannel?.(channelId);
 
-                    if (this.createdChannelsCache.value.includes(channelUrl)) { // Remove from created channels cache
-                        this.createdChannelsCache.value = this.createdChannelsCache.value.filter((item) => item !== channelUrl);
+                    if (this.createdChannels.has(channelUrl)) { // Remove from created channels cache
+                        this.createdChannels.delete(channelUrl);
+                        this.createdChannelsCache.value = Array.from(this.createdChannels);
                         this.createdChannelsCache.lazySave();
                     }
                 }

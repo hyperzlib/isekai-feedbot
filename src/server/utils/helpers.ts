@@ -1,5 +1,6 @@
 import { ChatIdentity } from '#ibot/message/Sender';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 
 export function compareProps(a: any, b: any, props: string[], depth: number = 5): boolean {
     if (depth <= 0) return true;
@@ -225,4 +226,35 @@ export function arrayDiff<T>(a: T[], b: T[]): { added: T[], removed: T[] } {
     }
 
     return { added, removed };
+}
+
+export function setDiff<T>(a: Set<T>, b: Set<T>): { added: Set<T>, removed: Set<T> } {
+    let added = new Set<T>();
+    let removed = new Set<T>();
+
+    for (let item of a) {
+        if (!b.has(item)) {
+            removed.add(item);
+        }
+    }
+
+    for (let item of b) {
+        if (!a.has(item)) {
+            added.add(item);
+        }
+    }
+
+    return { added, removed };
+}
+
+export function hashMd5(text: string): string {
+    return crypto.createHash('md5').update(text).digest('hex');
+}
+
+export function hyphenToCamelCase(text: string): string {
+    return text.replace(/-([a-z])/g, (match, p1) => p1.toUpperCase());
+}
+
+export function camelCaseToHyphen(text: string): string {
+    return text.replace(/([A-Z])/g, (match) => '-' + match.toLowerCase());
 }

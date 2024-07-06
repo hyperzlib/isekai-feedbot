@@ -9,3 +9,4 @@ dist/
 configs/
 config/
 data/
+parserTest.js
