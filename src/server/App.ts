@@ -204,4 +204,22 @@ export default class App {
 
         return sendMessage;
     }
+
+    public async initPath(type: 'cache', ...paths: string[]): Promise<string> {
+        let pathPrefix: string;
+        switch (type) {
+            case 'cache':
+                pathPrefix = this.config.cache_path;
+                break;
+            default:
+                throw new Error(`未知的路径类型: ${type}`);
+        }
+
+        let fullPath = path.join(this.basePath, pathPrefix, ...paths);
+        if (!fs.existsSync(fullPath)) {
+            await fs.promises.mkdir(fullPath, { recursive: true });
+        }
+
+        return fullPath;
+    }
 }

@@ -80,7 +80,7 @@ export class RoleManager {
                 defaultGroup = 'group_admin';
             } else if (rule.endsWith('/manage')) { // 将manage scope的默认分组设置为机器人管理
                 defaultGroup = 'bot_admin';
-            } else { // 其他默认分组为user
+            } else if (rule.endsWith('/main')) { // 其他默认分组为user
                 defaultGroup = 'user';
             }
         }

@@ -1,0 +1,5 @@
+id: brec_channel
+name: "Bilibili录播姬开播推送"
+description: "使用录播姬API的开播推送功能"
+author: "Hyperzlib <hyperzlib@outlook.com>"
+controller: "PluginController"

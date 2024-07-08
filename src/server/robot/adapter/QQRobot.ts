@@ -53,6 +53,8 @@ export default class QQRobot implements RobotAdapter {
     private wrapper!: Robot<QQRobot>;
     private endpoint?: string;
 
+    private imgCachePath = '';
+
     private botSocket?: ws;
     private socketQueryQueue: QueryQueueItem[] = [];
     private socketResponseQueue: Record<string, QueryQueueItem> = {};
@@ -82,6 +84,8 @@ export default class QQRobot implements RobotAdapter {
     async initialize(wrapper: Robot) {
         this.wrapper = wrapper;
 
+        this.imgCachePath = await this.app.initPath('cache', 'qq', this.userId, 'img');
+
         if (this.config.command_prefix) {
             if (Array.isArray(this.config.command_prefix)) {
                 this.wrapper.commandPrefix = this.config.command_prefix;
@@ -92,7 +96,7 @@ export default class QQRobot implements RobotAdapter {
 
         this.wrapper.account = this.userId;
 
-        await this.initRestfulApi(this.wrapper.restfulRouter, this.wrapper.restfulWsRouter);
+        await this.initRestfulApi();
         await this.infoProvider.initialize();
 
         this.socketQueueCleanerTaskId = setInterval(() => {
@@ -108,17 +112,20 @@ export default class QQRobot implements RobotAdapter {
         await this.infoProvider.destroy();
     }
 
-    async initRestfulApi(router: RestfulRouter, wsRouter: RestfulWsRouter) {
-        router.get('/event', (ctx: FullRestfulContext, next: koa.Next) => {
-            ctx.body = JSON.stringify({
+    async initRestfulApi() {
+        const { router, wsRouter, setupRouter } = this.app.restfulApi.getRobotRouter(this.robotId);
+
+        router.get('qq_robot_event', '/event', (ctx: FullRestfulContext, next: koa.Next) => {
+            ctx.body = {
                 status: 0,
                 message: 'Please use POST method.'
-            });
+            };
             next();
         });
-        router.post(`/event`, this.handlePostEvent.bind(this));
+        router.post('qq_robot_event_post', `/event`, this.handlePostEvent.bind(this));
+        this.app.logger.info(`QQ机器人事件接口: ${router.url('qq_robot_event_post', {})}`);
 
-        wsRouter.all('/ws', (ctx: FullRestfulContext, next: koa.Next) => {
+        wsRouter.all('qq_robot_event_ws', '/ws', (ctx: FullRestfulContext, next: koa.Next) => {
             ctx.websocket.on('message', (messageBuffer: Buffer) => {
                 try {
                     let message = JSON.parse(messageBuffer.toString('utf-8'));
@@ -133,6 +140,8 @@ export default class QQRobot implements RobotAdapter {
                                 return;
                             }
                             this.botSocket = ctx.websocket;
+
+                            this.app.logger.debug(`[QQRobot] Websocket Connected: ${ctx.socket.remoteAddress}:${ctx.socket.remotePort}`);
 
                             // 开始处理队列
                             this.startSocketQueryQueue();
@@ -169,6 +178,10 @@ export default class QQRobot implements RobotAdapter {
                 
             });
         });
+
+        this.app.logger.info(`QQ机器人事件接口 (WebSocket): ${wsRouter.url('qq_robot_event_ws', {})}`);
+
+        setupRouter();
     }
 
     async handlePostEvent(ctx: FullRestfulContext, next: koa.Next) {
@@ -191,9 +204,9 @@ export default class QQRobot implements RobotAdapter {
             }
         }
 
-        ctx.body = JSON.stringify({
+        ctx.body = {
             status: 1,
-        });
+        };
         await next();
     }
 
@@ -539,6 +552,15 @@ export default class QQRobot implements RobotAdapter {
 
     async getGroupFileUrl(data: any): Promise<string> {
         const res = await this.callRobotApi('get_group_file_url', data);
+        if (res && res.status === 'ok') {
+            return res.data?.url ?? "";
+        } else {
+            return "";
+        }
+    }
+
+    async getImageUrl(data: any): Promise<string> {
+        const res = await this.callRobotApi('get_image', data);
         if (res && res.status === 'ok') {
             return res.data?.url ?? "";
         } else {

@@ -18,6 +18,12 @@ export type FullRestfulContext = RestfulContext & Koa.BaseContext;
 export type RestfulRouter = Router<any, RestfulContext>;
 export type RestfulWsRouter = Router<any, RestfulContext> & KoaWebsocket.App;
 
+export type CreateRouterResule = {
+    router: RestfulRouter,
+    wsRouter: RestfulWsRouter,
+    setupRouter: () => void,
+}
+
 export class RestfulApiManager {
     private app: App;
     private config: RestfulApiConfig;
@@ -152,10 +158,41 @@ export class RestfulApiManager {
         return false;
     }
 
-    public getRobotRouter(robotId: string): [RestfulRouter, RestfulWsRouter] {
-        return [
-            this.router.prefix('/' + robotId),
-            this.wsRouter.prefix('/' + robotId) as RestfulWsRouter,
-        ];
+    public getRobotRouter(robotId: string): CreateRouterResule {
+        const router = new Router<any, RestfulContext>({
+            prefix: `/${robotId}`,
+        });
+
+        const wsRouter = new Router<any, RestfulContext>({
+            prefix: `/${robotId}`,
+        }) as RestfulWsRouter;
+
+        return {
+            router,
+            wsRouter,
+            setupRouter: () => {
+                this.router.use(router.routes());
+                this.wsRouter.use(wsRouter.routes() as any);
+            },
+        };
+    }
+
+    public getPluginRouter(pluginId: string): CreateRouterResule {
+        const router = new Router<any, RestfulContext>({
+            prefix: `/plugin/${pluginId}`,
+        });
+
+        const wsRouter = new Router<any, RestfulContext>({
+            prefix: `/plugin/${pluginId}`,
+        }) as RestfulWsRouter;
+
+        return {
+            router,
+            wsRouter,
+            setupRouter: () => {
+                this.router.use(router.routes());
+                this.wsRouter.use(wsRouter.routes() as any);
+            },
+        }
     }
 }

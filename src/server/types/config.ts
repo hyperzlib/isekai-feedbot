@@ -6,6 +6,8 @@ export type Config = {
     plugin_data_path: string;
     plugin_path: string;
 
+    cache_path: string;
+
     channel_config_path: string;
     subscribe_config: string;
     role_config_path: string;
@@ -33,6 +35,7 @@ export type RobotConfig = {
 export type RestfulApiConfig = {
     host: string;
     port: number;
+    publicDomain?: string;
     tokens: { [type: string]: any };
 };
 

@@ -44,8 +44,6 @@ export class Robot<Adapter extends RobotAdapter = any> {
 
     public adapter: Adapter;
     public storages?: RobotStorage;
-    public restfulRouter!: RestfulRouter;
-    public restfulWsRouter!: RestfulWsRouter;
 
     private app: App;
 
@@ -59,9 +57,6 @@ export class Robot<Adapter extends RobotAdapter = any> {
     }
 
     async initialize() {
-        // Restful API
-        [this.restfulRouter, this.restfulWsRouter] = this.app.restfulApi.getRobotRouter(this.robotId);
-
         // Storages
         this.storages = await this.app.storage.getStorages(this.robotId);
 

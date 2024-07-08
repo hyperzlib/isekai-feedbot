@@ -6,7 +6,7 @@ import { CommandInfo, PluginEvent } from "#ibot/PluginManager";
 export default class SystemController extends PluginController {
     async initialize() {
         // 基础指令
-        this.useScope('common', (event) => {
+        this.useScope('main', (event) => {
             event.registerCommand({
                 command: '帮助',
                 name: '获取帮助',

@@ -1,6 +1,7 @@
 import { PluginController } from "#ibot-api/PluginController";
 import App from "#ibot/App";
 import { PluginEvent, ScopeOptions } from "#ibot/PluginManager";
+import { CreateRouterResule as CreateRouterResult, RestfulRouter, RestfulWsRouter } from "#ibot/RestfulApiManager";
 
 export const MAIN_SCOPE_NAME = "main";
 
@@ -56,6 +57,10 @@ export class PluginApiBridge {
 
     public getConfigPath() {
         return this.app.plugin.getPluginConfigPath(this._pluginId);
+    }
+
+    public getRestfulRouter(): CreateRouterResult {
+        return this.app.restfulApi.getPluginRouter(this._pluginId);
     }
 
     public useScope(scopeName: string, callback: (event: PluginEvent) => void, scopeOptions?: ScopeOptions) {

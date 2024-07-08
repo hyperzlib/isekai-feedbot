@@ -124,9 +124,9 @@ export class PluginManager extends EventEmitter {
             await this.loadPlugin(pluginPath);
         }
 
-        await this.app.role.onPluginLoaded();
+        await this.initPlugins();
 
-        await this.postInit();
+        await this.app.role.onPluginLoaded();
 
         this.configWatcher = chokidar.watch(path.join(this.configPath, '**/*.yaml'), {
             ignorePermissionErrors: true,
@@ -135,7 +135,23 @@ export class PluginManager extends EventEmitter {
         this.configWatcher.on('change', this.reloadConfig.bind(this));
     }
 
-    public async postInit() {
+    public async initPlugins() {
+        for (let plugin of Object.values(this.pluginInstanceMap)) {
+            try {
+                const controllerConfig = await this.loadMainConfig(plugin.id, plugin.controller);
+
+                await plugin.controller._initialize(controllerConfig);
+            } catch(err: any) {
+                this.app.logger.error(`插件 ${plugin.id} 初始化失败`, err);
+                console.error(err);
+
+                this.emit('pluginPostInitFailed', plugin.controller);
+
+                // 移除插件
+                await this.unloadPlugin(plugin.id);
+            }
+        }
+
         for (let plugin of Object.values(this.pluginInstanceMap)) {
             try {
                 await plugin.controller.postInit();
@@ -217,10 +233,6 @@ export class PluginManager extends EventEmitter {
                     this.emit('pluginLoaded', controllerInstance);
                 }
 
-                const controllerConfig = await this.loadMainConfig(pluginId, controllerInstance);
-
-                await controllerInstance._initialize(controllerConfig);
-
                 if (isReload) { // 重新加载插件时，加载后就执行延迟加载函数
                     try {
                         await controllerInstance.postInit();
@@ -253,7 +265,7 @@ export class PluginManager extends EventEmitter {
             const configFile = this.getPluginMainConfigPath(pluginId);
 
             await instance.bridge.destroy();
-            await instance.controller.destroy?.();
+            await instance.controller._destroy();
             
             delete this.pluginInstanceMap[pluginId];
             
