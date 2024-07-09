@@ -27,6 +27,8 @@ export default class SystemController extends PluginController {
         const senderInfo = this.app.event.getSenderInfo(message);
         const subscribedPlugins = this.app.plugin.getSubscribed(senderInfo);
 
+        const userRules = new Set(await this.app.role.getUserRules(senderInfo));
+
         if (args) { // 获取指定插件的帮助
             let inputCommand = args.trim();
             for (let subscribedItem of subscribedPlugins) {
@@ -34,6 +36,11 @@ export default class SystemController extends PluginController {
                 for (let eventGroup of subscribedItem.eventGroups) {
                     for (let commandInfo of eventGroup.commandList) {
                         if (commandInfo.command === inputCommand || commandInfo.alias?.includes(inputCommand)) {
+                            if (!userRules.has(eventGroup.ruleId)) {
+                                await message.sendReply(`缺少使用此指令的必要权限`);
+                                return;
+                            }
+
                             let replyMsg = message.createReplyMessage();
                             replyMsg.type = 'commandHelp';
                             replyMsg._context.subscribed = subscribedPlugins;
@@ -73,6 +80,10 @@ export default class SystemController extends PluginController {
 
                 let commandList: CommandInfo[] = [];
                 for (let eventGroup of subscribedItem.eventGroups) {
+                    if (!userRules.has(eventGroup.ruleId)) {
+                        continue; // 没有权限的指令不显示
+                    }
+
                     commandList.push(...eventGroup.commandList);
                 }
                 if (commandList.length > 0) {

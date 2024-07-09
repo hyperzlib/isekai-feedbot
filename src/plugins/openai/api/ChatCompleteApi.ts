@@ -410,7 +410,7 @@ export class ChatCompleteApi {
                         this.logger.debug(`开始函数调用：${funcName}(${funcParams})`);
                         const funcResponse = await this.handleLLMFunctions(funcName, funcParams, options.receivedMessage);
                         let funcResponseTokens = gptEncode(funcResponse.message).length;
-                        this.logger.debug(`函数调用结果：${funcResponse}`);
+                        this.logger.debug(`函数调用结果：${funcResponse.message}`);
 
                         messageList.push(
                             {
@@ -447,7 +447,7 @@ export class ChatCompleteApi {
 
                                 this.logger.debug(`开始函数调用：${functionName}(${functionParams})`);
                                 const funcResponse = await this.handleLLMFunctions(functionName, functionParams, options.receivedMessage);
-                                this.logger.debug(`函数调用结果：${funcResponse}`);
+                                this.logger.debug(`函数调用结果：${funcResponse.message}`);
 
                                 let funcResponseTokens = gptEncode(funcResponse.message).length;
 

@@ -87,8 +87,8 @@ export class PluginManager extends EventEmitter {
     private watcher!: chokidar.FSWatcher;
     private configWatcher!: chokidar.FSWatcher;
 
-    public pluginInstanceMap: Record<string, PluginInstance> = {};
-    public configPluginMap: Record<string, string> = {};
+    public pluginInstanceMap: Map<string, PluginInstance> = new Map();
+    public configPluginMap: Map<string, string> = new Map();
 
     constructor(app: App, pluginPath: string, configPath: string, dataPath: string) {
         super();
@@ -98,7 +98,7 @@ export class PluginManager extends EventEmitter {
         this.configPath = path.resolve(configPath);
         this.dataPath = path.resolve(dataPath);
         
-        this.pluginInstanceMap = {};
+        this.pluginInstanceMap = new Map();
     }
 
     /**
@@ -136,7 +136,7 @@ export class PluginManager extends EventEmitter {
     }
 
     public async initPlugins() {
-        for (let plugin of Object.values(this.pluginInstanceMap)) {
+        for (let plugin of this.pluginInstanceMap.values()) {
             try {
                 const controllerConfig = await this.loadMainConfig(plugin.id, plugin.controller);
 
@@ -152,7 +152,7 @@ export class PluginManager extends EventEmitter {
             }
         }
 
-        for (let plugin of Object.values(this.pluginInstanceMap)) {
+        for (let plugin of this.pluginInstanceMap.values()) {
             try {
                 await plugin.controller.postInit();
             } catch(err: any) {
@@ -214,13 +214,13 @@ export class PluginManager extends EventEmitter {
                 pluginApiBridge.setController(controllerInstance);
 
                 let isReload = false;
-                if (pluginId in this.pluginInstanceMap) {
+                if (this.pluginInstanceMap.has(pluginId)) {
                     // Reload plugin
                     isReload = true;
                     await this.unloadPlugin(pluginId, true);
                 }
 
-                this.pluginInstanceMap[pluginId] = pluginInstance;
+                this.pluginInstanceMap.set(pluginId, pluginInstance);
 
                 if (isReload) {
                     this.app.logger.info(`已重新加载插件: ${pluginId}`);
@@ -253,24 +253,24 @@ export class PluginManager extends EventEmitter {
             console.error(`加载插件失败: ${folder}`);
             console.error(err);
 
-            if (pluginId && this.pluginInstanceMap[pluginId]) {
-                delete this.pluginInstanceMap[pluginId];
+            if (pluginId && this.pluginInstanceMap.has(pluginId)) {
+                this.pluginInstanceMap.delete(pluginId);
             }
         }
     }
 
     public async unloadPlugin(pluginId: string, isReload = false) {
-        const instance = this.pluginInstanceMap[pluginId];
+        const instance = this.pluginInstanceMap.get(pluginId);
         if (instance) {
             const configFile = this.getPluginMainConfigPath(pluginId);
 
             await instance.bridge.destroy();
             await instance.controller._destroy();
             
-            delete this.pluginInstanceMap[pluginId];
+            this.pluginInstanceMap.delete(pluginId);
             
-            if (configFile in this.configPluginMap) {
-                delete this.configPluginMap[configFile];
+            if (this.configPluginMap.has(configFile)) {
+                this.configPluginMap.delete(configFile);
             }
             this.emit('pluginUnloaded', instance);
 
@@ -281,7 +281,7 @@ export class PluginManager extends EventEmitter {
     }
 
     public async reloadPlugin(pluginId: string) {
-        let pluginInstance = this.pluginInstanceMap[pluginId];
+        let pluginInstance = this.pluginInstanceMap.get(pluginId);
         if (!pluginInstance) return;
 
         await this.loadPlugin(pluginInstance.path);
@@ -310,8 +310,8 @@ export class PluginManager extends EventEmitter {
     private async loadMainConfig(pluginId: string, controller: PluginController) {
         const configFile = this.getPluginMainConfigPath(pluginId);
         try {
-            if (configFile in this.configPluginMap) { // 防止保存时触发重载
-                delete this.configPluginMap[configFile];
+            if (this.configPluginMap.has(configFile)) { // 防止保存时触发重载
+                this.configPluginMap.delete(configFile);
             }
 
             const defaultConfig = await controller.getDefaultConfig?.() ?? {};
@@ -335,7 +335,7 @@ export class PluginManager extends EventEmitter {
             }
 
             setTimeout(() => {
-                this.configPluginMap[configFile] = pluginId;
+                this.configPluginMap.set(configFile, pluginId);
             }, 1000);
 
             return config;
@@ -347,10 +347,10 @@ export class PluginManager extends EventEmitter {
 
     public async reloadConfig(file: string) {
         this.app.logger.info(`配置文件已更新: ${file}`);
-        if (file in this.configPluginMap) {
-            const pluginId = this.configPluginMap[file];
+        if (this.configPluginMap.has(file)) {
+            const pluginId = this.configPluginMap.get(file)!;
             try {
-                const pluginInstance = this.pluginInstanceMap[pluginId];
+                const pluginInstance = this.pluginInstanceMap.get(pluginId);
                 if (pluginInstance) {
                     const ctor = pluginInstance.controller.constructor as typeof PluginController;
                     if (ctor.reloadWhenConfigUpdated) { // 重载整个控制器
@@ -378,7 +378,7 @@ export class PluginManager extends EventEmitter {
         let subscribedScopes = this.app.event.getPluginSubscribe(senderInfo);
 
         let subscribed: SubscribedPluginInfo[] = [];
-        for (let pluginInstance of Object.values(this.pluginInstanceMap)) {
+        for (let pluginInstance of this.pluginInstanceMap.values()) {
             let eventGroups: PluginEvent[] = [];
             for (let scopeName in pluginInstance.bridge.scopedEvent) {
                 let eventGroup = pluginInstance.bridge.scopedEvent[scopeName];
@@ -435,11 +435,11 @@ export class PluginManager extends EventEmitter {
     }
 
     public getPluginController<T extends PluginController>(pluginId: string): T | null {
-        return (this.pluginInstanceMap[pluginId]?.controller ?? null) as any;
+        return (this.pluginInstanceMap.get(pluginId)?.controller ?? null) as any;
     }
 
     public getPluginInstance<T extends PluginController>(pluginId: string): PluginInstance<T> | null {
-        return (this.pluginInstanceMap[pluginId] ?? null) as any;
+        return (this.pluginInstanceMap.get(pluginId) ?? null) as any;
     }
 }
 
@@ -466,7 +466,11 @@ export class EventScope {
         this.scopeName = scopeName;
 
         // 添加权限
-        this.app.role.addBaseRule(`${pluginId}/${scopeName}`, scopeOptions.defaultGroup);
+        this.app.role.addBaseRule(this.ruleId, scopeOptions.defaultGroup);
+    }
+
+    public get ruleId() {
+        return `${this.pluginId}/${this.scopeName}`;
     }
 
     /**

@@ -4,12 +4,16 @@ import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
 import { MessagePriority, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
 import ChatGPTController from "../openai/PluginController";
+import { UserRequestError } from "#ibot-api/error/errors";
 
 export type QueueData = {
     message: CommonReceivedMessage,
     prompt: string,
+    noErrorReply: boolean,
     subjectType?: string,
     paintSize?: string,
+    resolve: (extractedPrompt: string) => void,
+    reject: (reason: any) => void,
 };
 
 export type ApiConfig = {
@@ -36,6 +40,7 @@ export type SizeConfig = {
 
 export type Text2ImgRuntimeOptions = {
     useTranslate?: boolean,
+    noErrorReply?: boolean,
 };
 
 export type GPUInfoResponse = {
@@ -111,6 +116,21 @@ export default class StableDiffusionController extends PluginController<typeof d
             });
         });
 
+        const openaiPlugin = this.app.getPlugin<ChatGPTController>('openai');
+        openaiPlugin?.registerLLMFunction('generate_image', {
+            displayName: '生成图片',
+            description: '当你想生成图片或者绘画时非常有用。',
+            params: [
+                {
+                    "name": "content",
+                    "description": "描述需要生成的图片内容。",
+                    "required": true,
+                    "schema": { "type": "string" },
+                },
+            ],
+            callback: this.llmGenerateImage.bind(this),
+        })
+
         const runQueue = async () => {
             await this.runQueue();
             if (this.running) {
@@ -169,41 +189,69 @@ export default class StableDiffusionController extends PluginController<typeof d
             this.bannedWordsMatcher.push(this.makeWordMatcher(word));
         });
     }
+
+    private async llmGenerateImage(params: any, message?: CommonReceivedMessage): Promise<string> {
+        if (!params.content) {
+            return "请提供需要生成的图片内容。";
+        }
+
+        if (!message) {
+            return "此功能只能在聊天中使用。";
+        }
+
+        try {
+            let res = await this.text2img(params.content, message, {
+                useTranslate: true
+            });
+
+            if (!res) {
+                return "生成图片失败。";
+            }
+
+            let resPrompt = await res.promise;
+
+            return `图片生成成功。图片内容：${resPrompt}。图片已发送给用户。`;
+        } catch (e: any) {
+            if (!(e instanceof UserRequestError)) {
+                this.logger.error(`生成图片失败：${e.message}`);
+                console.error(e);
+            }
+
+            return `生成图片失败：${e.message}`;
+        }
+    }
     
     public async text2img(prompt: string, message: CommonReceivedMessage, options: Text2ImgRuntimeOptions = {}) {
-        const userSessionStore = message.session.user;
+        try {
+            const userSessionStore = message.session.user;
 
-        // 使用频率限制
-        let rateLimitExpires = await userSessionStore.getRateLimit(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit, this.config.rate_limit_minutes * 60);
-        if (rateLimitExpires) {
-            let minutesLeft = Math.ceil(rateLimitExpires / 60);
-            await message.sendReply(`才刚画过呢，${minutesLeft}分钟后再来吧。`, true);
-            return;
-        }
-        await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
+            // 使用频率限制
+            let rateLimitExpires = await userSessionStore.getRateLimit(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit, this.config.rate_limit_minutes * 60);
+            if (rateLimitExpires) {
+                let minutesLeft = Math.ceil(rateLimitExpires / 60);
+                throw new UserRequestError(`才刚画过呢，${minutesLeft}分钟后再来吧。`);
+            }
+            await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
 
-        if (this.queue.length >= this.config.queue_max_size) {
-            await message.sendReply('太多人在画了，等一下再来吧。', true);
-            return;
-        }
+            if (this.queue.length >= this.config.queue_max_size) {
+                throw new UserRequestError('太多人在画了，等一下再来吧。');
+            }
 
-        prompt = prompt.trim();
-        this.logger.debug("收到绘图请求: " + prompt);
+            prompt = prompt.trim();
+            this.logger.debug("收到绘图请求: " + prompt);
 
-        let paintSize: string | undefined;
-        let subjectType: string | undefined;
+            let paintSize: string | undefined;
+            let subjectType: string | undefined;
 
-        let llmApi = this.app.getPlugin<ChatGPTController>('openai');
-        if (llmApi) {
-            // 使用ChatGPT生成Prompt
-            let messageList: any[] = [
-                { role: 'system', content: 'You are a helpful assistant.' },
-                { role: 'user', content: LLM_PROMPT.replace(/\{\{\{prompt\}\}\}/g, prompt) }
-            ];
+            let llmApi = this.app.getPlugin<ChatGPTController>('openai');
+            if (llmApi) {
+                // 使用ChatGPT生成Prompt
+                let messageList: any[] = [
+                    { role: 'system', content: 'You are a helpful assistant.' },
+                    { role: 'user', content: LLM_PROMPT.replace(/\{\{\{prompt\}\}\}/g, prompt) }
+                ];
 
-            try {
                 let replyRes = await llmApi.doApiRequest(messageList);
-                let containsPrompt = false;
                 if (replyRes.outputMessage) {
                     let reply = replyRes.outputMessage;
                     this.logger.debug(`ChatGPT返回: ${reply}`);
@@ -215,78 +263,109 @@ export default class StableDiffusionController extends PluginController<typeof d
                             paintSize = promptRes.size;
                             subjectType = promptRes.subject;
                             this.logger.debug(`ChatGPT生成Prompt结果: ${prompt}, 画幅: ${paintSize}, 类型: ${subjectType}`);
-                            containsPrompt = true;
                         }
                     } else {
-                        await message.sendReply(`生成Prompt失败: ${reply}`, true);
-                        return;
+                        throw new UserRequestError(`生成Prompt失败: ${reply}`);
                     }
                 } else {
-                    await message.sendReply(`生成Prompt失败: Prompt生成器返回为空`, true);
-                    return;
+                    throw new UserRequestError(`生成Prompt失败: Prompt生成器返回为空`);
                 }
-            } catch (err: any) {
-                this.logger.error("ChatGPT生成Prompt失败", err);
-                console.error(err);
+            } else if (options.useTranslate) {
+                if (prompt.match(/[\u4e00-\u9fa5]/)) {
+                    prompt = await this.translateCaiyunAI(prompt);
+                    this.logger.debug("Prompt翻译结果: " + prompt);
+                    if (!prompt) {
+                        throw new UserRequestError('尝试翻译出错，过会儿再试试吧。');
+                    }
+                } else {
+                    this.logger.debug("Prompt不需要翻译");
+                }
+            }
 
-                if (err.name === 'HTTPError' && err.response) {
-                    switch (err.response.statusCode) {
-                        case 429:
+            let api = this.getMostMatchedApi(prompt, subjectType);
+            // 检查是否有禁用词
+            for (let matcher of this.bannedWordsMatcher) {
+                if (prompt.match(matcher)) {
+                    throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
+                }
+            }
+            for (let matcher of api._banned_words_matcher!) {
+                if (prompt.match(matcher)) {
+                    throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
+                }
+            }
+
+            if (api.append_prompt) {
+                prompt += ', ' + api.append_prompt;
+            }
+
+            const promise = new Promise<string>((resolve, reject) => {
+                this.queue.push({
+                    message,
+                    prompt,
+                    noErrorReply: !!options.noErrorReply,
+                    subjectType,
+                    paintSize,
+                    resolve,
+                    reject,
+                });
+            });
+
+            return {
+                prompt,
+                paintSize,
+                subjectType,
+                promise,
+            }; 
+        } catch (err: any) {
+            if (err instanceof UserRequestError) {
+                if (!options.noErrorReply) {
+                    await message.sendReply(err.message, true);
+                } else {
+                    throw err;
+                }
+                return;
+            }
+
+            this.logger.error("ChatGPT生成Prompt失败", err);
+            console.error(err);
+
+            if (err.name === 'HTTPError' && err.response) {
+                switch (err.response.statusCode) {
+                    case 429:
+                        if (options.noErrorReply) {
+                            throw new UserRequestError('API调用过于频繁，请稍后再试');
+                        } else {
                             await message.sendReply('太频繁了，过会儿再试试呗。', true);
                             return;
-                    }
-                } else if (err.name === 'RequestError') {
-                    await message.sendReply(`连接失败：${err.message}，过会儿再试试呗。`, true);
+                        }
+                }
+            } else if (err.name === 'RequestError') {
+                if (options.noErrorReply) {
+                    throw new UserRequestError(`连接失败: ${err.message}`);
+                } else {
+                    await message.sendReply(`连接失败: ${err.message}，过会儿再试试呗。`, true);
                     return;
-                } else if (err.name === 'ChatGPTAPIError') {
-                    if (err.json) {
-                        if (err.json.error?.code === 'content_filter') {
+                }
+            } else if (err.name === 'ChatGPTAPIError') {
+                if (err.json) {
+                    if (err.json.error?.code === 'content_filter') {
+                        if (options.noErrorReply) {
+                            throw new UserRequestError('生成图片失败: 请不要发送不适当的内容。');
+                        } else {
                             await message.sendReply('逆天', true);
                             return;
                         }
                     }
                 }
+            }
 
+            if (options.noErrorReply) {
+                throw new UserRequestError(`生成图片失败: ${err.message}`);
+            } else {
                 await message.sendReply(`生成图片失败: ${err.message}`, true);
             }
-        } else if (options.useTranslate) {
-            if (prompt.match(/[\u4e00-\u9fa5]/)) {
-                prompt = await this.translateCaiyunAI(prompt);
-                this.logger.debug("Prompt翻译结果: " + prompt);
-                if (!prompt) {
-                    await message.sendReply('尝试翻译出错，过会儿再试试吧。', true);
-                    return;
-                }
-            } else {
-                this.logger.debug("Prompt不需要翻译");
-            }
         }
-
-        let api = this.getMostMatchedApi(prompt, subjectType);
-        // 检查是否有禁用词
-        for (let matcher of this.bannedWordsMatcher) {
-            if (prompt.match(matcher)) {
-                await message.sendReply(`生成图片失败：关键词中包含禁止的内容。`, true);
-                return;
-            }
-        }
-        for (let matcher of api._banned_words_matcher!) {
-            if (prompt.match(matcher)) {
-                await message.sendReply(`生成图片失败：关键词中包含禁止的内容。`, true);
-                return;
-            }
-        }
-
-        if (api.append_prompt) {
-            prompt += ', ' + api.append_prompt;
-        }
-
-        this.queue.push({
-            message,
-            prompt,
-            subjectType,
-            paintSize,
-        });
     }
 
     private makeWordMatcher(word: string) {
@@ -441,8 +520,9 @@ export default class StableDiffusionController extends PluginController<typeof d
                     },
                 }).json<any>();
 
+                let caption: string = currentTask.prompt;
                 if (interrogateRes.caption) {
-                    let caption = interrogateRes.caption;
+                    caption = interrogateRes.caption;
                     this.logger.debug("DeepDanbooru导出关键字：" + caption);
 
                     let keywords = caption.split(',').map((keyword: string) => keyword.trim());
@@ -453,7 +533,11 @@ export default class StableDiffusionController extends PluginController<typeof d
                         api.banned_words?.find((keyword) => keywords.includes(keyword));
 
                     if (bannedKeyword) {
-                        await currentTask.message.sendReply(`生成图片失败：图片中包含禁用的 ${bannedKeyword} 内容。`, true);
+                        currentTask.reject(new UserRequestError(`图片中包含禁用的 ${bannedKeyword} 内容。`));
+                        
+                        if (!currentTask.noErrorReply) {
+                            await currentTask.message.sendReply(`生成图片失败：图片中包含禁用的 ${bannedKeyword} 内容。`, true);
+                        }
                         return;
                     }
                 }
@@ -467,12 +551,23 @@ export default class StableDiffusionController extends PluginController<typeof d
                         }
                     } as ImageMessage
                 ], false);
+
+                currentTask.resolve(caption);
             }
         } catch (e: any) {
-            this.logger.error("生成图片失败：" + e.message);
-            console.error(e);
-            await currentTask.message.sendReply('生成图片失败：' + e.message, true);
-            return;
+            if (e instanceof UserRequestError) {
+                if (!currentTask.noErrorReply) {
+                    await currentTask.message.sendReply(e.message, true);
+                }
+                currentTask.reject(e.message);
+            } else {
+                this.logger.error("生成图片失败：" + e.message);
+                console.error(e);
+                if (!currentTask.noErrorReply) {
+                    await currentTask.message.sendReply('生成图片失败：' + e.message, true);
+                }
+                currentTask.reject(e.message);
+            }
         }
     }
 }

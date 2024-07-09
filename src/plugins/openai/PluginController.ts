@@ -9,6 +9,7 @@ import { PluginController } from "#ibot-api/PluginController";
 import { InternalLLMFunction } from "./api/InternalLLMFunction";
 import { ChatCompleteApi, ChatGPTApiResponse, RequestChatCompleteOptions } from "./api/ChatCompleteApi";
 import { Robot } from "#ibot/robot/Robot";
+import { splitPrefix } from "#ibot/utils";
 
 export type ChatGPTApiMessage = {
     role: 'summary' | 'assistant' | 'user' | 'function' | 'tool',
@@ -433,10 +434,18 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             }
         }
 
+        console.log('args', args);
+
         let messageChunks = [...message.content];
         if (messageChunks[0].type.includes('text')) {
             const firstChunk = { ...messageChunks[0] }
-            firstChunk.text = firstChunk.text?.substring(args.command.length).trimStart() ?? '';
+
+            // 移除命令
+            let parts = splitPrefix(firstChunk.text ?? '', args.command);
+            if (parts.length === 2) {
+                firstChunk.text = parts[1].trimStart();
+            }
+
             messageChunks[0] = firstChunk;
         }
 

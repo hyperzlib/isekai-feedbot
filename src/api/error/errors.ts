@@ -32,6 +32,13 @@ export class ParseError extends Error {
     }
 }
 
+export class UserRequestError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'RequestError';
+    }
+}
+
 export class NotFoundError extends Error {
     constructor(message: string, resourceId?: string) {
         super(message);

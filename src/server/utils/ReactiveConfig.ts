@@ -12,6 +12,9 @@ export class ReactiveConfig<T extends {}> {
 
     private _loaded: boolean = false;
 
+    private _loadFilter?: (value: any) => T | Promise<T>;
+    private _saveFilter?: (value: T) => any | Promise<any>;
+
     private saving: boolean = false;
 
     private fileName: string;
@@ -50,6 +53,14 @@ export class ReactiveConfig<T extends {}> {
     public on(eventName: 'saved', listener: (value: T) => void): void
     public on(eventName: string, listener: (...args: any[]) => void) {
         this.eventEmitter.on(eventName, listener);
+    }
+
+    public setLoadFilter(filter: (value: any) => T) {
+        this._loadFilter = filter;
+    }
+
+    public setSaveFilter(filter: (value: T) => any) {
+        this._saveFilter = filter;
     }
 
     public async initialize(autoCreate: boolean = true) {
@@ -94,11 +105,18 @@ export class ReactiveConfig<T extends {}> {
         let oldValue = this.value;
         if (existsSync(this.fileName)) {
             let content = await readFile(this.fileName, { encoding: 'utf-8' });
+            let value: any;
             if (this.parserType === 'json') {
-                this._value = JSON.parse(content);
+                value = JSON.parse(content);
             } else {
-                this._value = Yaml.parse(content);
+                value = Yaml.parse(content);
             }
+
+            if (this._loadFilter) {
+                value = await this._loadFilter(value);
+            }
+
+            this._value = value;
 
             if (oldValue) {
                 this.eventEmitter.emit('change', this._value, oldValue);
@@ -117,11 +135,17 @@ export class ReactiveConfig<T extends {}> {
         if (this._value) {
             this.saving = true;
 
+            let value = this._value;
+
+            if (this._saveFilter) {
+                value = await this._saveFilter(this._value);
+            }
+
             let content: string;
             if (this.parserType === 'json') {
-                content = JSON.stringify(this._value, null, 4);
+                content = JSON.stringify(value, null, 4);
             } else {
-                content = Yaml.stringify(this._value);
+                content = Yaml.stringify(value);
             }
 
             await writeFile(this.fileName, content);
