@@ -149,28 +149,28 @@ export default class RWKVRolePlayingController extends PluginController<typeof d
             return this.handleChangeCharacter(args, message);
         });
 
-        // this.event.on('message/focused', async (message, resolve) => {
-        //     if (message.repliedId && message.id) {
-        //         let repliedMessage = await message.getRepliedMessage();
-        //         if (repliedMessage) {
-        //             if (!repliedMessage.extra?.isRWKVReply) {
-        //                 // 不回复其他控制器发出的消息
-        //                 return;
-        //             }
+        this.event.on('message/focused', async (message, resolve) => {
+            if (message.repliedId && message.id) {
+                let repliedMessage = await message.getRepliedMessage();
+                if (repliedMessage) {
+                    if (!repliedMessage.extra?.isRWKVReply) {
+                        // 不回复其他控制器发出的消息
+                        return;
+                    }
 
-        //             if ((repliedMessage.receiver as ChatIdentity)?.userId !== message.sender.userId) {
-        //                 // 不回复其他人的消息
-        //                 return;
-        //             }
-        //         }
-        //     }
+                    if ((repliedMessage.receiver as ChatIdentity)?.userId !== message.sender.userId) {
+                        // 不回复其他人的消息
+                        return;
+                    }
+                }
+            }
 
-        //     resolve();
+            resolve();
 
-        //     return this.handleChatCompleteRequest(message.contentText, message, 'saved', false);
-        // }, {
-        //     priority: MessagePriority.LOW
-        // });
+            return this.handleChatCompleteRequest(message.contentText, message, 'saved', false);
+        }, {
+            priority: MessagePriority.LOW
+        });
 
         // 内置LLM函数
         this.llmFunctions.ban_user = this.funcBanUser.bind(this);

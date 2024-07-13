@@ -1,0 +1,5 @@
+id: midjourney
+name: "Midjourney 代理"
+description: "绘画生成"
+author: "Hyperzlib <hyperzlib@outlook.com>"
+controller: "PluginController"

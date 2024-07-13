@@ -7,6 +7,7 @@ import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, Message
 import { Robot } from "./robot/Robot";
 import { SubscribeItem, SubscribeTargetInfo } from "./SubscribeManager";
 import { Reactive } from "./utils/reactive";
+import { chatIdentityToString } from "./utils";
 
 export type ControllerEventInfo = {
     priority: number;
@@ -26,7 +27,7 @@ export type ControllerCommandInfo = {
 
 export type EventMeta = {
     sender?: ChatIdentity;
-    userRules?: string[];
+    userRules?: Set<string>;
 }
 
 export class EventManager {
@@ -35,11 +36,11 @@ export class EventManager {
     /** 事件排序的debounce */
     private eventSortDebounce: Record<string, NodeJS.Timeout> = {};
 
-    /** 全局事件列表 */
-    private eventList: Record<string, ControllerEventInfo[]> = {};
+    /** 全局事件监听器列表 */
+    private listenerList: Record<string, ControllerEventInfo[]> = {};
     
-    /** 会话事件列表 */
-    private sessionEventList: Record<string, EventScope> = {};
+    /** 会话事件监听器列表 */
+    private sessionListenerList: Record<string, EventScope> = {};
 
     /** 全局指令列表 */
     private commandList: Record<string, ControllerCommandInfo> = {};
@@ -60,8 +61,8 @@ export class EventManager {
     }
 
     public on<Callback extends CallableFunction = CallableFunction>(event: string, eventScope: PluginEvent, callback: Callback, options?: MessageEventOptions) {
-        if (!(event in this.eventList)) {
-            this.eventList[event] = [];
+        if (!(event in this.listenerList)) {
+            this.listenerList[event] = [];
         }
 
         let defaultOptions: MessageEventOptions = {
@@ -82,7 +83,7 @@ export class EventManager {
             eventScope
         };
 
-        this.eventList[event].push(eventInfo);
+        this.listenerList[event].push(eventInfo);
 
         this.sortEvent(event);
     }
@@ -92,13 +93,13 @@ export class EventManager {
     public off(...args: any): void {
         if (typeof args[0] === 'string') {
             let [event, controller, callback] = args;
-            if (Array.isArray(this.eventList[event])) {
-                this.eventList[event] = this.eventList[event].filter((eventInfo) => eventInfo.callback !== callback || eventInfo.eventScope !== controller);
+            if (Array.isArray(this.listenerList[event])) {
+                this.listenerList[event] = this.listenerList[event].filter((eventInfo) => eventInfo.callback !== callback || eventInfo.eventScope !== controller);
             }
         } else if (typeof args[0] !== 'undefined') {
             let controller = args[0];
-            for (let event in this.eventList) {
-                this.eventList[event] = this.eventList[event].filter((eventInfo) => eventInfo.eventScope !== controller);
+            for (let event in this.listenerList) {
+                this.listenerList[event] = this.listenerList[event].filter((eventInfo) => eventInfo.eventScope !== controller);
             }
         }
     }
@@ -157,17 +158,11 @@ export class EventManager {
             }
         }
         
-        const eventList = this.eventList[eventName];
-        if (!eventList) return false;
+        /** 监听器列表 */
+        const registeredListeners = this.listenerList[eventName];
+        if (!registeredListeners) return false;
 
-        const isFilter = eventName.startsWith('filter/');
         const isCommand = eventName.startsWith('command/');
-
-        let isResolved = false;
-
-        const resolved = () => {
-            isResolved = true;
-        };
 
         const buildOnError = (eventInfo: ControllerEventInfo) => (error: Error) => {
             this.app.logger.error(`[${eventInfo.eventScope.pluginId}/${eventInfo.eventScope.scopeName}] 处理事件 ${eventName} 时出错`, error);
@@ -187,61 +182,67 @@ export class EventManager {
             }
         }
 
+        /** 当前聊天订阅的插件列表 */
         let subscribedPlugins = this.getPluginSubscribe(meta.sender);
 
-        for (let eventInfo of eventList) {
-            if (!isFilter && meta.sender) {
-                switch (meta.sender.type) {
-                    case 'private':
-                        if (!eventInfo.eventScope.allowPrivate) {
-                            continue;
-                        }
-                        if (!eventInfo.eventScope.isAllowSubscribe(meta.sender)) {
-                            continue;
-                        }
-                        break;
-                    case 'group':
-                        if (!eventInfo.eventScope.allowGroup) {
-                            continue;
-                        }
-                        break;
-                    case 'channel':
-                        if (!eventInfo.eventScope.allowChannel) {
-                            continue;
-                        }
-                        break;
-                }
-
-                const eventScope = eventInfo.eventScope;
-
-                // 检测用户是否有使用此控制器的权限
-                const ruleName = `${eventScope.pluginId}/${eventScope.scopeName}`;
-                if (meta.userRules && !meta.userRules.includes(ruleName)) {
-                    this.app.logger.debug(`用户权限不足，用户权限：[${meta.userRules.join(', ')}]，所需权限：[${ruleName}]`);
-                    continue;
-                }
+        /** 当前可用事件监听器 */
+        let activeListeners = registeredListeners.filter((listenerInfo) => {
+            if (meta.sender) {
+                const eventScope = listenerInfo.eventScope;
                 
-                // 检测控制器是否已禁用
                 if (!this.isPluginScopeInList(eventScope.pluginId, eventScope.scopeName, subscribedPlugins)) {
-                    if (isCommand) {
-                        // 如果是指令，标记为权限不足
-                        console.log('权限不足：', eventScope.pluginId, eventScope.scopeName);
-                    }
-                    continue;
+                    return false;
                 }
+
+                // 过滤聊天类型
+                if (!eventScope.isAllowSubscribe(meta.sender)) {
+                    this.app.logger.warn(`${chatIdentityToString(meta.sender!)} 已订阅不兼容的插件: ${eventScope.pluginId}/${eventScope.scopeName}`);
+                    return false;
+                }
+
+                return true;
+            }
+        });
+
+        let isResolved = false;
+
+        const resolved = () => {
+            isResolved = true;
+        };
+
+        let cmdRequiredRule: string | null = null;
+
+        for (let listenerInfo of activeListeners) {
+            // 检测用户是否有使用此控制器的权限
+            const eventScope = listenerInfo.eventScope;
+            const ruleName = `${eventScope.pluginId}/${eventScope.scopeName}`;
+            if (meta.userRules && !meta.userRules.has(ruleName)) {
+                if (isCommand)
+                this.app.logger.debug(`已过滤事件，用户权限：[${meta.userRules}]，所需权限：${ruleName}`);
+                cmdRequiredRule = ruleName;
+                return false;
             }
 
             try {
-                const ret = await eventInfo.callback(...args, resolved);
+                const ret = await listenerInfo.callback(...args, resolved);
                 if (isResolved) {
+                    cmdRequiredRule = null;
                     break;
                 }
                 // detect ret is promise
                 if (ret && typeof ret.catch === 'function') {
-                    ret.catch(buildOnError(eventInfo));
+                    ret.catch(buildOnError(listenerInfo));
                 }
             } catch(err: any) {
-                buildOnError(eventInfo)(err);
+                buildOnError(listenerInfo)(err);
+            }
+        }
+
+        if (cmdRequiredRule) {
+            // 提示权限错误
+            if (typeof args[0] === 'object' && args[0].chatType) {
+                const msg: CommonReceivedMessage = args[0];
+                msg.sendReply(`使用此功能需要 ${cmdRequiredRule} 权限`);
             }
         }
         
@@ -401,7 +402,7 @@ export class EventManager {
         }
 
         this.eventSortDebounce[eventName] = setTimeout(() => {
-            this.eventList[eventName] = this.eventList[eventName].sort((a, b) => b.priority - a.priority);
+            this.listenerList[eventName] = this.listenerList[eventName].sort((a, b) => b.priority - a.priority);
 
             delete this.eventSortDebounce[eventName];
         }, 200);

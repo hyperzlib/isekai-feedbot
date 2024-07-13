@@ -434,8 +434,6 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             }
         }
 
-        console.log('args', args);
-
         let messageChunks = [...message.content];
         if (messageChunks[0].type.includes('text')) {
             const firstChunk = { ...messageChunks[0] }

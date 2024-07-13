@@ -1,37 +1,53 @@
 import { PluginController } from "#ibot-api/PluginController";
-import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
-import got from "got/dist/source";
+import { CommonReceivedMessage, CommonSendMessage, ImageMessage } from "#ibot/message/Message";
+import got, { OptionsOfTextResponseBody } from "got/dist/source";
 import ChatGPTController from "../openai/PluginController";
 import { UserRequestError } from "#ibot-api/error/errors";
+import { FetchFn, Midjourney, MJBot, MJConfigParam, MJMessage, NijiBot } from "midjourney";
+import { HttpsProxyAgent } from "hpagent";
+import WebSocket from "isomorphic-ws";
+import { asleep } from "#ibot/utils";
+import { CommandInputArgs } from "#ibot/PluginManager";
 
-export type QueueData = {
+export type ImagineTaskInfo = {
     message: CommonReceivedMessage,
     prompt: string,
     noErrorReply: boolean,
     subjectType?: string,
     paintSize?: string,
-    resolve: (extractedPrompt: string) => void,
+    resolve: () => void,
+    reject: (reason: any) => void,
+};
+
+export type UpscaleTaskInfo = {
+    message: CommonReceivedMessage,
+    pickIndex: number,
+    apiId: string,
+    msgId: string,
+    hash: string,
+    flags: number,
+    noErrorReply: boolean,
+    resolve: () => void,
     reject: (reason: any) => void,
 };
 
 export type ApiConfig = {
-    endpoint: string,
+    id: string,
+    salai_token: string,
+    bot_id?: string,
+    server_id: string,
+    channel_id: string,
     main?: boolean,
-    sampler_name?: string,
-    steps?: number,
+    proxy?: string,
     trigger_words?: string[],
     subject_types?: string[],
-    append_prompt?: string,
-    negative_prompt?: string,
     banned_words?: string[],
-    api_params?: Record<string, any>,
     _banned_words_matcher?: RegExp[],
 };
 
 export type SizeConfig = {
     id: string,
-    width: number,
-    height: number,
+    ratio: string,
     default?: boolean,
     trigger_words?: string[],
 };
@@ -41,47 +57,76 @@ export type Text2ImgRuntimeOptions = {
     noErrorReply?: boolean,
 };
 
-export type GPUInfoResponse = {
-    name: string,
-    memory_total: number,
-    memory_used: number,
-    memory_free: number,
-    load: number,
-    temperature: number,
+const LLM_PROMPT: string = "Please generate the Midjourney prompt according to the following requirements. The output format is:\n" +
+    '```{"prompt": "[prompt content]", "size": "(portrait|landscape|avatar)", "subject": "(boy|girl|item|landscape|animal)"}```.\n' +
+    'The prompt should in simple English. You need to describe the scene in detail. here are some formula for a Midjourney image prompt:' +
+    ' - For characters: An image of [adjective] [subject] with [clothing, earring and accessories] [doing action]\n' +
+    ' - For landscapes and items: An image of [subject] with [some creative details]\n' +
+    '\n' +
+    '请根据以下要求生成：\n' +
+    '{{{prompt}}}';
+
+const createProxyFetch = (proxyUrl: string): FetchFn => {
+    return async (input, init): Promise<Response> => {
+        const agent = new HttpsProxyAgent({
+            keepAlive: true,
+            keepAliveMsecs: 1000,
+            maxSockets: 256,
+            maxFreeSockets: 256,
+            scheduling: "lifo",
+            proxy: proxyUrl,
+        });
+        if (!init) init = {};
+        // @ts-ignore
+        init.agent = agent;
+        // @ts-ignore
+        return fetch(input, init);
+    }
 }
 
-const LLM_PROMPT: string = "Please generate the Stable Diffusion prompt according to the following requirements. The output format is:\n" +
-'```{"prompt": "[prompt content]", "size": "(portrait|landscape|avatar)", "subject": "(boy|girl|item|landscape|animal)"}```.\n' +
-'The prompt should in simple English. You need to describe the scene in detail. here are some formula for a Stable Diffusion image prompt:' +
-' - For characters: An image of [adjective] [subject] with [clothing, earring and accessories] [doing action], [1boy, 1girl, 2boys and then]\n' +
-' - For landscapes and items: An image of [subject] with [some creative details]\n' +
-'\n' +
-'请根据以下要求生成：\n' +
-'画{{{prompt}}}';
+const createProxyWebSocket = (proxyUrl: string): any => {
+    return class WebSocketProxy extends WebSocket {
+        constructor(address: any, options: any) {
+            const agent = new HttpsProxyAgent({
+                keepAlive: true,
+                keepAliveMsecs: 1000,
+                maxSockets: 256,
+                maxFreeSockets: 256,
+                scheduling: "lifo",
+                proxy: proxyUrl,
+            });
+
+            if (!options) options = {};
+            options.agent = agent;
+            super(address, options);
+        }
+    }
+}
 
 const defaultConfig = {
     api: [] as ApiConfig[],
     size: [] as SizeConfig[],
     banned_words: [] as string[],
-    banned_output_words: [] as string[],
     queue_max_size: 4,
     rate_limit: 1,
     rate_limit_minutes: 2,
-    safe_temperature: null as number | null,
     translate_caiyunai: {
         key: ""
     },
 }
 
-export default class StableDiffusionController extends PluginController<typeof defaultConfig> {
-    private SESSION_KEY_GENERATE_COUNT = 'stablediffusion_generateCount';
-    
+export default class MidjourneyController extends PluginController<typeof defaultConfig> {
+    private SESSION_KEY_GENERATE_COUNT = 'midjourney_generateCount';
+
     public chatGPTClient: any;
 
     private mainApi!: ApiConfig;
     private defaultSize!: SizeConfig;
-    
-    private queue: QueueData[] = [];
+
+    private clients: Record<string, Midjourney> = {};
+
+    private imagineQueue: ImagineTaskInfo[] = [];
+    private upscaleQueue: UpscaleTaskInfo[] = [];
     private running = true;
 
     private apiMatcher: RegExp[][] = [];
@@ -89,23 +134,14 @@ export default class StableDiffusionController extends PluginController<typeof d
     private bannedWordsMatcher: RegExp[] = [];
 
     async getDefaultConfig() {
-        return ;
+        return;
     }
 
     async initialize(config: any) {
         this.event.registerCommand({
-            command: 'paint',
-            name: '使用英语短句或关键词生成绘画',
-            alias: ['draw'],
-        }, (args, message, resolve) => {
-            resolve();
-
-            return this.text2img(args.param, message);
-        });
-        
-        this.event.registerCommand({
-            command: '画',
-            name: '使用中文关键词生成绘画',
+            command: 'midjourney',
+            name: '使用Midjourney生成绘画',
+            alias: ['mj', 'imagine']
         }, (args, message, resolve) => {
             resolve();
 
@@ -115,49 +151,30 @@ export default class StableDiffusionController extends PluginController<typeof d
         });
 
         this.event.registerCommand({
-            command: '生成图片信息',
-            name: '获取生成的图片信息',
+            command: '获取图片',
+            name: '从Midjourney生成的图片中获取一张',
         }, async (args, message, resolve) => {
             if (!message.repliedId) {
                 return;
             }
 
             const repliedMessage = await message.getRepliedMessage();
-            if (!repliedMessage?.extra.isStableDiffusionResult) {
+            if (!repliedMessage?.extra.isMidjourneyResult && repliedMessage?.extra.mjType !== 'imagine') {
                 return;
             }
 
             resolve();
 
-            return message.sendReply(`图片信息：\n` +
-                `Prompt: ${repliedMessage.extra.prompt}\n\n` +
-                `Negative Prompt: ${repliedMessage.extra.negativePrompt}\n`);
-        });
-
-        const openaiPlugin = this.app.getPlugin<ChatGPTController>('openai');
-        openaiPlugin?.registerLLMFunction('generate_image', {
-            displayName: '生成图片',
-            description: '当你想生成图片或者绘画时非常有用。',
-            params: [
-                {
-                    "name": "content",
-                    "description": "描述需要生成的图片内容。",
-                    "required": true,
-                    "schema": { "type": "string" },
-                },
-            ],
-            callback: this.llmGenerateImage.bind(this),
+            return this.upscaleImage(args, message, repliedMessage as CommonSendMessage);
         });
 
         const runQueue = async () => {
-            await this.runQueue();
-            if (this.running) {
-                setTimeout(() => {
-                    runQueue();
-                }, 100);
+            while(this.running) {
+                await this.runQueue();
+                await asleep(100);
             }
         }
-        runQueue();
+        runQueue().catch((e) => console.error(e));
     }
 
     async destroy() {
@@ -175,8 +192,7 @@ export default class StableDiffusionController extends PluginController<typeof d
         if (!defaultSize) {
             defaultSize = {
                 id: "default",
-                width: 512,
-                height: 512
+                ratio: '1:1'
             };
         }
         this.defaultSize = defaultSize;
@@ -188,7 +204,7 @@ export default class StableDiffusionController extends PluginController<typeof d
                 matcher.push(this.makeWordMatcher(word));
             });
             this.apiMatcher.push(matcher);
-            
+
             apiConf.banned_words ??= [];
             apiConf._banned_words_matcher = apiConf.banned_words.map((word) => this.makeWordMatcher(word));
         });
@@ -206,6 +222,46 @@ export default class StableDiffusionController extends PluginController<typeof d
         this.config.banned_words.forEach((word) => {
             this.bannedWordsMatcher.push(this.makeWordMatcher(word));
         });
+    }
+
+    private async getClient(apiConfig: ApiConfig) {
+        const token = apiConfig.salai_token;
+        if (!this.clients[token]) {
+            let botId: any = MJBot;
+            // switch (apiConfig.bot_id) {
+            //     case 'mj':
+            //     case 'midjourney':
+            //         botId = MJBot;
+            //         break;
+            //     case 'nj':
+            //     case 'niji':
+            //         botId = NijiBot;
+            //         break;
+            // }
+
+            let options: MJConfigParam = {
+                SalaiToken: apiConfig.salai_token,
+                BotId: botId,
+                ServerId: apiConfig.server_id,
+                ChannelId: apiConfig.channel_id,
+                Ws: true,
+                // Debug: this.app.debug,
+            };
+
+            if (apiConfig.proxy) {
+                options.fetch = createProxyFetch(apiConfig.proxy);
+                options.WebSocket = createProxyWebSocket(apiConfig.proxy);
+            }
+
+            const client = new Midjourney(options);
+
+            this.clients[token] = client;
+        }
+
+        const client = this.clients[token];
+        await client.Connect();
+
+        return client;
     }
 
     private async llmGenerateImage(params: any, message?: CommonReceivedMessage): Promise<string> {
@@ -249,7 +305,7 @@ export default class StableDiffusionController extends PluginController<typeof d
             return `生成图片失败：${e.message}`;
         }
     }
-    
+
     public async text2img(prompt: string, message: CommonReceivedMessage, options: Text2ImgRuntimeOptions = {}) {
         try {
             const userSessionStore = message.session.user;
@@ -262,7 +318,7 @@ export default class StableDiffusionController extends PluginController<typeof d
             }
             await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
 
-            if (this.queue.length >= this.config.queue_max_size) {
+            if (this.imagineQueue.length >= this.config.queue_max_size) {
                 throw new UserRequestError('太多人在画了，等一下再来吧。');
             }
 
@@ -324,12 +380,8 @@ export default class StableDiffusionController extends PluginController<typeof d
                 }
             }
 
-            if (api.append_prompt) {
-                prompt += ', ' + api.append_prompt;
-            }
-
-            const promise = new Promise<string>((resolve, reject) => {
-                this.queue.push({
+            const promise = new Promise<void>((resolve, reject) => {
+                this.imagineQueue.push({
                     message,
                     prompt,
                     noErrorReply: !!options.noErrorReply,
@@ -345,7 +397,7 @@ export default class StableDiffusionController extends PluginController<typeof d
                 paintSize,
                 subjectType,
                 promise,
-            }; 
+            };
         } catch (err: any) {
             if (err instanceof UserRequestError) {
                 if (!options.noErrorReply) {
@@ -397,6 +449,54 @@ export default class StableDiffusionController extends PluginController<typeof d
         }
     }
 
+    public async upscaleImage(args: CommandInputArgs, message: CommonReceivedMessage, repliedMessage: CommonSendMessage) {
+        try {
+            let pickIndex = parseInt(args.param);
+            if (isNaN(pickIndex) && pickIndex < 0 && pickIndex > 4) {
+                await message.sendReply('请在1-4之间选择一个图片序号。', true);
+            }
+
+            const promise = new Promise<void>((resolve, reject) => {
+                this.upscaleQueue.push({
+                    message,
+                    pickIndex,
+                    apiId: repliedMessage.extra.mjApi,
+                    msgId: repliedMessage.extra.mjMsgId,
+                    hash: repliedMessage.extra.mjHash,
+                    flags: repliedMessage.extra.mjFlags,
+                    noErrorReply: false,
+                    resolve,
+                    reject,
+                });
+            });
+
+            return {
+                promise,
+            };
+        } catch (err: any) {
+            if (err instanceof UserRequestError) {
+                await message.sendReply(err.message, true);
+                return;
+            }
+
+            this.logger.error("Upscale图片失败", err);
+            console.error(err);
+
+            if (err.name === 'HTTPError' && err.response) {
+                switch (err.response.statusCode) {
+                    case 429:
+                        await message.sendReply('太频繁了，过会儿再试试呗。', true);
+                        return;
+                }
+            } else if (err.name === 'RequestError') {
+                await message.sendReply(`连接失败: ${err.message}，过会儿再试试呗。`, true);
+                return;
+            }
+
+            await message.sendReply(`Upscale图片失败: ${err.message}`, true);
+        }
+    }
+
     private makeWordMatcher(word: string) {
         return new RegExp(`([^a-z]|^)${word}([^a-z]|$)`, 'gi');
     }
@@ -422,19 +522,6 @@ export default class StableDiffusionController extends PluginController<typeof d
             }
         } catch (e) {
             this.logger.error("无法翻译", e);
-            console.error(e);
-        }
-        return null;
-    }
-
-    public async getGPUInfo(): Promise<GPUInfoResponse | null> {
-        try {
-            let res = await got.get(this.mainApi.endpoint + '/sdapi/v1/gpu-info').json<any>();
-            if (res) {
-                return res;
-            }
-        } catch (e) {
-            this.logger.error("无法读取GPU信息", e);
             console.error(e);
         }
         return null;
@@ -491,86 +578,108 @@ export default class StableDiffusionController extends PluginController<typeof d
         }
     }
 
+    private async loadImageFromUrl(url: string, proxy?: string) {
+        let options: OptionsOfTextResponseBody = {};
+        if (proxy) {
+            options.headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+            };
+            
+            options.agent = {
+                https: new HttpsProxyAgent({
+                    keepAlive: true,
+                    keepAliveMsecs: 1000,
+                    maxSockets: 256,
+                    maxFreeSockets: 256,
+                    scheduling: "lifo",
+                    proxy: proxy,
+                }),
+            }
+        }
+
+        let resImage = await got(url, options).buffer();
+        
+        return resImage;
+    }
+
+    private async compressThumb(image: Buffer) {
+        try {
+            const sharp = await import('sharp');
+            let imgObj = sharp.default(image);
+            
+            const maxSize = 1920;
+
+            let metadata = await imgObj.metadata();
+            let imgWidth = metadata.width ?? 2048;
+            let imgHeight = metadata.height ?? 2048;
+
+            let targetWidth = 0;
+            let targetHeight = 0;
+
+            if (imgWidth > imgHeight) {
+                targetWidth = Math.min(imgWidth, maxSize);
+                targetHeight = Math.round(targetWidth * imgHeight / imgWidth);
+            } else {
+                targetHeight = Math.min(imgHeight, maxSize);
+                targetWidth = Math.round(targetHeight * imgWidth / imgHeight);
+            }
+
+            const thumb = await imgObj.resize(targetWidth, targetHeight).jpeg({ quality: 80 }).toBuffer();
+
+            return thumb;
+        } catch(err: any) {
+            if (err.code === 'MODULE_NOT_FOUND') {
+                this.logger.warn("未安装sharp模块，跳过压缩图片。");
+                return image;
+            }
+
+            throw err;
+        }
+    }
+
     public async runQueue() {
         if (!this.running) {
             return;
         }
-        if (this.queue.length === 0) {
+        if (this.imagineQueue.length === 0 && this.upscaleQueue.length === 0) {
             return;
         }
 
-        // Wait for GPU to be ready
-        let gpuInfo = await this.getGPUInfo();
-        if (!gpuInfo) {
-            return;
-        }
-        if (this.config.safe_temperature && gpuInfo.temperature > this.config.safe_temperature) {
-            // Wait for GPU to cool down
-            return;
-        }
-        
-        // Start generating
-        const currentTask = this.queue.shift()!;
+        if (this.upscaleQueue.length > 0) {
+            // 优先处理放大请求
+            const currentTask = this.upscaleQueue.shift()!;
 
-        this.logger.debug("开始生成图片: " + currentTask.prompt);
+            this.logger.debug("开始放大图片: " + currentTask.msgId);
 
-        let api = this.getMostMatchedApi(currentTask.prompt, currentTask.subjectType);
-        this.logger.debug("使用API: " + api.endpoint);
+            let api = this.config.api.find(api => api.id === currentTask.apiId);
+            if (!api) {
+                await currentTask.message.sendReply('放大图片失败：未找到API', true);
+                return;
+            }
 
-        let size = this.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
-        this.logger.debug("使用尺寸: " + size.width + "x" + size.height);
+            try {
+                const client = await this.getClient(api);
 
-        let extraApiParams = api.api_params ?? {};
-
-        try {
-            let txt2imgRes = await got.post(api.endpoint + '/sdapi/v1/txt2img', {
-                json: {
-                    do_not_save_samples: false,
-                    do_not_save_grid: false,
-                    ...extraApiParams,
-                    prompt: currentTask.prompt,
-                    width: size.width,
-                    height: size.height,
-                    sampler_name: api.sampler_name ?? "Euler a",
-                    negative_prompt: api.negative_prompt ?? "",
-                    steps: api.steps ?? 28,
+                let upscaleRes: MJMessage | null = null;
+                try {
+                    upscaleRes = await client.Upscale({
+                        index: currentTask.pickIndex as any,
+                        msgId: currentTask.msgId,
+                        hash: currentTask.hash,
+                        flags: currentTask.flags,
+                    });
+                } catch (err) {
+                    throw err;
                 }
-            }).json<any>();
-            if (Array.isArray(txt2imgRes.images) && txt2imgRes.images.length > 0) {
-                this.logger.debug("生成图片成功，开始检查图片内容");
 
-                let image = txt2imgRes.images[0];
-
-                // Check banned words
-                let interrogateRes = await got.post(this.mainApi.endpoint + '/sdapi/v1/interrogate', {
-                    json: {
-                        model: "deepdanbooru",
-                        image: image,
-                    },
-                }).json<any>();
-
-                let caption: string = currentTask.prompt;
-                if (interrogateRes.caption) {
-                    caption = interrogateRes.caption;
-                    this.logger.debug("DeepDanbooru导出关键字：" + caption);
-
-                    let keywords = caption.split(',').map((keyword: string) => keyword.trim());
-                    let bannedKeywords = this.config.banned_words;
-                    let bannedOutputKeywords = this.config.banned_output_words;
-                    let bannedKeyword = bannedKeywords.find((keyword) => keywords.includes(keyword)) ||
-                        bannedOutputKeywords.find((keyword) => keywords.includes(keyword)) ||
-                        api.banned_words?.find((keyword) => keywords.includes(keyword));
-
-                    if (bannedKeyword) {
-                        currentTask.reject(new UserRequestError(`图片中包含禁用的 ${bannedKeyword} 内容。`));
-                        
-                        if (!currentTask.noErrorReply) {
-                            await currentTask.message.sendReply(`生成图片失败：图片中包含禁用的 ${bannedKeyword} 内容。`, true);
-                        }
-                        return;
-                    }
+                if (!upscaleRes) {
+                    await currentTask.message.sendReply('放大图片失败：Upscale对象为空', true);
+                    return;
                 }
-                
+
+                let imageUrl = upscaleRes.proxy_url ?? upscaleRes.uri;
+                let image = await this.loadImageFromUrl(imageUrl, api.proxy);
+
                 await currentTask.message.sendReply([
                     {
                         type: ['image'],
@@ -580,26 +689,102 @@ export default class StableDiffusionController extends PluginController<typeof d
                         }
                     } as ImageMessage
                 ], false, {
-                    isStableDiffusionResult: true,
-                    prompt: currentTask.prompt,
-                    negativePrompt: api.negative_prompt,
+                    isMidjourneyResult: true,
+                    mjType: 'upscale',
+                    mjApi: api.id,
+                    mjMsgId: upscaleRes.id,
+                    mjHash: upscaleRes.hash,
+                    mjFlags: upscaleRes.flags,
                 });
 
-                currentTask.resolve(caption);
-            }
-        } catch (e: any) {
-            if (e instanceof UserRequestError) {
-                if (!currentTask.noErrorReply) {
+                currentTask.resolve();
+            } catch(e: any) {
+                if (e instanceof UserRequestError) {
                     await currentTask.message.sendReply(e.message, true);
+                } else {
+                    this.logger.error("放大图片失败：" + e.message);
+                    console.error(e);
+                    await currentTask.message.sendReply('放大图片失败：' + e.message, true);
                 }
-                currentTask.reject(e.message);
-            } else {
-                this.logger.error("生成图片失败：" + e.message);
-                console.error(e);
-                if (!currentTask.noErrorReply) {
-                    await currentTask.message.sendReply('生成图片失败：' + e.message, true);
+            }
+        } else {
+            // Start generating
+            const currentTask = this.imagineQueue.shift()!;
+
+            this.logger.debug("开始生成图片: " + currentTask.prompt);
+
+            let api = this.getMostMatchedApi(currentTask.prompt, currentTask.subjectType);
+            this.logger.debug("使用API: " + api.id);
+
+            let size = this.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
+            this.logger.debug("使用尺寸: " + size.ratio);
+
+            const prompt = `${currentTask.prompt} --ar ${size.ratio}`;
+
+            try {
+                const client = await this.getClient(api);
+
+                let imagineRes: MJMessage | null = null;
+                let noticeSent = false;
+                try {
+                    imagineRes = await client.Imagine(
+                        prompt,
+                        (uri: string, progress: string) => {
+                            if (!noticeSent) {
+                                currentTask.message.sendReply('正在生成图片，请稍等。', true).catch(console.error);
+                                noticeSent = true;
+                            }
+                        }
+                    );
+                } catch (err) {
+                    throw err;
                 }
-                currentTask.reject(e.message);
+
+                if (!imagineRes) {
+                    await currentTask.message.sendReply('生成图片失败：Imagine对象为空', true);
+                    return;
+                }
+
+                let imageUrl = imagineRes.proxy_url ?? imagineRes.uri;
+                let image = await this.loadImageFromUrl(imageUrl, api.proxy);
+
+                image = await this.compressThumb(image);
+
+                await currentTask.message.sendReply([
+                    {
+                        type: ['image'],
+                        text: '[图片]',
+                        data: {
+                            url: "base64://" + image.toString('base64'),
+                        }
+                    } as ImageMessage
+                ], false, {
+                    isMidjourneyResult: true,
+                    prompt: currentTask.prompt,
+                    mjType: 'imagine',
+                    mjApi: api.id,
+                    mjMsgId: imagineRes.id,
+                    mjHash: imagineRes.hash,
+                    mjFlags: imagineRes.flags,
+                });
+
+                currentTask.resolve();
+            } catch(e: any) {
+                if (e instanceof UserRequestError) {
+                    if (!currentTask.noErrorReply) {
+                        await currentTask.message.sendReply(e.message, true);
+                    }
+                    // currentTask.reject(e.message);
+                } else {
+                    this.logger.error("生成图片失败：" + e.message);
+                    console.error(e);
+                    if (!currentTask.noErrorReply) {
+                        await currentTask.message.sendReply('生成图片失败：' + e.message, true);
+                    }
+                    // currentTask.reject(e.message);
+                }
+            } finally {
+                
             }
         }
     }

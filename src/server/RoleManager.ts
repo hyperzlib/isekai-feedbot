@@ -259,8 +259,8 @@ export class RoleManager {
      * @param chatIdentity 
      * @returns 
      */
-    public async getUserRules(chatIdentity: ChatIdentity): Promise<string[]> {
-        return this.cache.wrap(`userRules:${chatIdentityToCacheKey(chatIdentity)}`, async () => {
+    public async getUserRules(chatIdentity: ChatIdentity): Promise<Set<string>> {
+        let userRules = await this.cache.wrap(`userRules:${chatIdentityToCacheKey(chatIdentity)}`, async () => {
             let userGroups = await this.getUserGroups(chatIdentity);
             let userRules: string[] = [];
             for (let group of userGroups) {
@@ -273,6 +273,8 @@ export class RoleManager {
     
             return userRules;
         }, CACHE_EXPIRE);
+
+        return new Set(userRules);
     }
 
     /**
@@ -285,7 +287,7 @@ export class RoleManager {
         let userRules = await this.getUserRules(chatIdentity);
         
         for (let rule of rules) {
-            if (!userRules.includes(rule)) {
+            if (!userRules.has(rule)) {
                 return false;
             }
         }
@@ -303,7 +305,7 @@ export class RoleManager {
         let userRules = await this.getUserRules(chatIdentity);
 
         for (let rule of rules) {
-            if (userRules.includes(rule)) {
+            if (userRules.has(rule)) {
                 return true;
             }
         }
