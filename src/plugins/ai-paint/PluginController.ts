@@ -3,6 +3,7 @@ import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
 import got from "got/dist/source";
 import ChatGPTController from "../openai/PluginController";
 import { UserRequestError } from "#ibot-api/error/errors";
+import { OpenAIGetLLMFunctions } from "../openai/types/events";
 
 export type QueueData = {
     message: CommonReceivedMessage,
@@ -134,19 +135,20 @@ export default class StableDiffusionController extends PluginController<typeof d
                 `Negative Prompt: ${repliedMessage.extra.negativePrompt}\n`);
         });
 
-        const openaiPlugin = this.app.getPlugin<ChatGPTController>('openai');
-        openaiPlugin?.registerLLMFunction('generate_image', {
-            displayName: '生成图片',
-            description: '当你想生成图片或者绘画时非常有用。',
-            params: [
-                {
-                    "name": "content",
-                    "description": "描述需要生成的图片内容。",
-                    "required": true,
-                    "schema": { "type": "string" },
-                },
-            ],
-            callback: this.llmGenerateImage.bind(this),
+        this.event.on<OpenAIGetLLMFunctions>('openai/get_llm_functions', (_, functios) => {
+            functios.register('generate_image', {
+                displayName: '生成图片',
+                description: '当你想生成图片或者绘画时非常有用。',
+                params: [
+                    {
+                        name: "content",
+                        description: "描述需要生成的图片内容。",
+                        required: true,
+                        schema: { "type": "string" },
+                    },
+                ],
+                callback: this.llmGenerateImage.bind(this),
+            });
         });
 
         const runQueue = async () => {

@@ -6,13 +6,14 @@ import { UserRequestError } from "#ibot-api/error/errors";
 import { FetchFn, Midjourney, MJBot, MJConfigParam, MJMessage, NijiBot } from "midjourney";
 import { HttpsProxyAgent } from "hpagent";
 import WebSocket from "isomorphic-ws";
-import { asleep } from "#ibot/utils";
+import { asleep, withTimeout } from "#ibot/utils";
 import { CommandInputArgs } from "#ibot/PluginManager";
 
 export type ImagineTaskInfo = {
     message: CommonReceivedMessage,
     prompt: string,
     noErrorReply: boolean,
+    isRaw?: boolean,
     subjectType?: string,
     paintSize?: string,
     resolve: () => void,
@@ -58,8 +59,8 @@ export type Text2ImgRuntimeOptions = {
 };
 
 const LLM_PROMPT: string = "Please generate the Midjourney prompt according to the following requirements. The output format is:\n" +
-    '```{"prompt": "[prompt content]", "size": "(portrait|landscape|avatar)", "subject": "(boy|girl|item|landscape|animal)"}```.\n' +
-    'The prompt should in simple English. You need to describe the scene in detail. here are some formula for a Midjourney image prompt:' +
+    '```{"prompt": "[prompt content]", "size": "Must be one of (portrait|landscape|avatar)", "subject": "Must be one of (boy|girl|item|landscape|animal)"}```.\n' +
+    'The prompt should in simple English. You just need to output json. You need to describe the scene in detail. here are some formula for a Midjourney image prompt:' +
     ' - For characters: An image of [adjective] [subject] with [clothing, earring and accessories] [doing action]\n' +
     ' - For landscapes and items: An image of [subject] with [some creative details]\n' +
     '\n' +
@@ -113,6 +114,7 @@ const defaultConfig = {
     translate_caiyunai: {
         key: ""
     },
+    prompt_gen_llm_id: undefined as string | undefined,
 }
 
 export default class MidjourneyController extends PluginController<typeof defaultConfig> {
@@ -327,20 +329,32 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
             let paintSize: string | undefined;
             let subjectType: string | undefined;
+            let isRaw = false;
 
             let llmApi = this.app.getPlugin<ChatGPTController>('openai');
-            if (llmApi) {
+
+            if (prompt.includes('--raw')) {
+                // 使用原prompt
+                prompt = prompt.replace(/--raw ?/g, '').trim();
+                subjectType = 'raw';
+                isRaw = true;
+            } else if (llmApi) {
                 // 使用ChatGPT生成Prompt
                 let messageList: any[] = [
                     { role: 'system', content: 'You are a helpful assistant.' },
                     { role: 'user', content: LLM_PROMPT.replace(/\{\{\{prompt\}\}\}/g, prompt) }
                 ];
 
-                let replyRes = await llmApi.doApiRequest(messageList);
+                let apiConf = llmApi.getApiConfigById(this.config.prompt_gen_llm_id ?? '');
+                let llmFunctions = await llmApi.getLLMFunctions();
+
+                let replyRes = await llmApi.doApiRequest(messageList, apiConf, {
+                    llmFunctions,
+                });
                 if (replyRes.outputMessage) {
                     let reply = replyRes.outputMessage;
                     this.logger.debug(`ChatGPT返回: ${reply}`);
-                    let matchedJson = reply.match(/\{.*\}/);
+                    let matchedJson = reply.match(/\{[\s\S]*\}/);
                     if (matchedJson) {
                         let promptRes = JSON.parse(matchedJson[0]);
                         if (promptRes) {
@@ -387,6 +401,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                     noErrorReply: !!options.noErrorReply,
                     subjectType,
                     paintSize,
+                    isRaw,
                     resolve,
                     reject,
                 });
@@ -420,6 +435,9 @@ export default class MidjourneyController extends PluginController<typeof defaul
                             await message.sendReply('太频繁了，过会儿再试试呗。', true);
                             return;
                         }
+                    default:
+                        console.error(err.response.body);
+                        break;
                 }
             } else if (err.name === 'RequestError') {
                 if (options.noErrorReply) {
@@ -602,12 +620,10 @@ export default class MidjourneyController extends PluginController<typeof defaul
         return resImage;
     }
 
-    private async compressThumb(image: Buffer) {
+    private async compressThumb(image: Buffer, maxSize: number = 1920) {
         try {
             const sharp = await import('sharp');
             let imgObj = sharp.default(image);
-            
-            const maxSize = 1920;
 
             let metadata = await imgObj.metadata();
             let imgWidth = metadata.width ?? 2048;
@@ -645,6 +661,8 @@ export default class MidjourneyController extends PluginController<typeof defaul
             return;
         }
 
+        let client: Midjourney | null = null;
+
         if (this.upscaleQueue.length > 0) {
             // 优先处理放大请求
             const currentTask = this.upscaleQueue.shift()!;
@@ -658,18 +676,26 @@ export default class MidjourneyController extends PluginController<typeof defaul
             }
 
             try {
-                const client = await this.getClient(api);
+                client = await this.getClient(api);
 
                 let upscaleRes: MJMessage | null = null;
+
                 try {
-                    upscaleRes = await client.Upscale({
+                    upscaleRes = await withTimeout(1 * 60 * 1000, client!.Upscale({
                         index: currentTask.pickIndex as any,
                         msgId: currentTask.msgId,
                         hash: currentTask.hash,
                         flags: currentTask.flags,
-                    });
-                } catch (err) {
-                    throw err;
+                    }));
+                    upscaleRes = upscaleRes ?? null;
+                } catch (err: any) {
+                    if (err.name === 'TimeoutError') {
+                        await currentTask.message.sendReply('放大图片超时', true);
+                        client.Close();
+                        return;
+                    } else {
+                        throw err;
+                    }
                 }
 
                 if (!upscaleRes) {
@@ -680,12 +706,14 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 let imageUrl = upscaleRes.proxy_url ?? upscaleRes.uri;
                 let image = await this.loadImageFromUrl(imageUrl, api.proxy);
 
+                image = await this.compressThumb(image, 3840);
+
                 await currentTask.message.sendReply([
                     {
                         type: ['image'],
                         text: '[图片]',
                         data: {
-                            url: "base64://" + image,
+                            url: "base64://" + image.toString('base64'),
                         }
                     } as ImageMessage
                 ], false, {
@@ -706,6 +734,11 @@ export default class MidjourneyController extends PluginController<typeof defaul
                     console.error(e);
                     await currentTask.message.sendReply('放大图片失败：' + e.message, true);
                 }
+            } finally {
+                if (this.upscaleQueue.length === 0 && this.imagineQueue.length === 0) {
+                    // Close the connection if no more tasks
+                    client?.Close();
+                }
             }
         } else {
             // Start generating
@@ -716,18 +749,24 @@ export default class MidjourneyController extends PluginController<typeof defaul
             let api = this.getMostMatchedApi(currentTask.prompt, currentTask.subjectType);
             this.logger.debug("使用API: " + api.id);
 
-            let size = this.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
-            this.logger.debug("使用尺寸: " + size.ratio);
+            let prompt = currentTask.prompt;
 
-            const prompt = `${currentTask.prompt} --ar ${size.ratio}`;
+            if (!currentTask.isRaw) {
+                // 自动选择尺寸
+                let size = this.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
+                this.logger.debug("使用尺寸: " + size.ratio);
+                prompt += ` --ar ${size.ratio}`;
+            }
 
             try {
-                const client = await this.getClient(api);
+                client = await this.getClient(api);
 
                 let imagineRes: MJMessage | null = null;
                 let noticeSent = false;
+
+                // 2分钟后自动关闭连接
                 try {
-                    imagineRes = await client.Imagine(
+                    imagineRes = await withTimeout(4 * 60 * 1000, client.Imagine(
                         prompt,
                         (uri: string, progress: string) => {
                             if (!noticeSent) {
@@ -735,8 +774,14 @@ export default class MidjourneyController extends PluginController<typeof defaul
                                 noticeSent = true;
                             }
                         }
-                    );
-                } catch (err) {
+                    ));
+                } catch (err: any) {
+                    if (err.name === 'TimeoutError') {
+                        await currentTask.message.sendReply('生成图片超时', true);
+                        client.Close();
+                        return;
+                    }
+
                     throw err;
                 }
 
@@ -784,7 +829,10 @@ export default class MidjourneyController extends PluginController<typeof defaul
                     // currentTask.reject(e.message);
                 }
             } finally {
-                
+                if (this.upscaleQueue.length === 0 && this.imagineQueue.length === 0) {
+                    // Close the connection if no more tasks
+                    client?.Close();
+                }
             }
         }
     }

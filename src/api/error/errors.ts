@@ -52,3 +52,10 @@ export class PluginDependencyError extends Error {
         this.name = 'PluginDependencyError';
     }
 }
+
+export class TimeoutError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'TimeoutError';
+    }
+}

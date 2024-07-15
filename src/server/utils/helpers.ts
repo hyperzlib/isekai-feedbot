@@ -1,6 +1,7 @@
 import { ChatIdentity } from '#ibot/message/Sender';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import { TimeoutError } from '#ibot-api/error/errors';
 
 export function compareProps(a: any, b: any, props: string[], depth: number = 5): boolean {
     if (depth <= 0) return true;
@@ -246,6 +247,36 @@ export function setDiff<T>(a: Set<T>, b: Set<T>): { added: Set<T>, removed: Set<
 
     return { added, removed };
 }
+
+export function withTimeout<T>(ms: number, promise: Promise<T>): Promise<T> {
+    let timeouted = false;
+
+    let _resolve!: (value: T) => void;
+    let _reject!: (reason?: any) => void;
+    let finalPromise = new Promise<T>((resolve, reject) => {
+        _resolve = resolve;
+        _reject = reject;
+    });
+
+    let tid = setTimeout(() => {
+        timeouted = true;
+        _reject(new TimeoutError('timeout'));
+    }, ms);
+
+    promise.then((value) => {
+        if (!timeouted) {
+            clearTimeout(tid);
+            _resolve(value);
+        }
+    }).catch((reason) => {
+        if (!timeouted) {
+            clearTimeout(tid);
+            _reject(reason);
+        }
+    });
+
+    return finalPromise;
+};
 
 export function hashMd5(text: string): string {
     return crypto.createHash('md5').update(text).digest('hex');

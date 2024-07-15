@@ -1,13 +1,14 @@
 import App from "#ibot/App";
 import { CommonReceivedMessage } from "#ibot/message/Message";
 import { fetchEventSource, FetchEventSourceInit } from "@waylaidwanderer/fetch-event-source";
-import ChatGPTController, { ChatCompleteApiConfig, ChatGPTApiMessage, ChatGPTMessageInfo, FunctionCallingResponse } from "../PluginController";
+import ChatGPTController, { ChatCompleteApiConfig, ChatGPTApiMessage, ChatGPTMessageInfo } from "../PluginController";
 import { ProxyAgent } from "undici"; 
 import { encode as gptEncode } from 'gpt-3-encoder';
 import { asleep, Logger, MessageTypingSimulator } from "#ibot/utils";
 import got, { OptionsOfTextResponseBody } from "got";
 import { HttpsProxyAgent } from "hpagent";
 import { randomInt } from "crypto";
+import { LLMFunctionContainer } from "./LLMFunction";
 
 export type ChatGPTApiResponse = {
     messageList: ChatGPTMessageInfo[],
@@ -17,9 +18,9 @@ export type ChatGPTApiResponse = {
 
 export type RequestChatCompleteOptions = {
     receivedMessage?: CommonReceivedMessage
-    functionCall?: boolean
+    llmFunctions?: LLMFunctionContainer,
     onMessage?: (chunk: string) => any,
-}
+};
 
 export const defaultRequestChatCompleteOptions = {
     functionCall: true,
@@ -63,83 +64,6 @@ export class ChatCompleteApi {
         }
 
         throw new Error('Unknown API type: ' + apiConf.type);
-    }
-
-    private getOpenAPIToolDefinition(apiType: string = 'openai') {
-        return Object.entries(this.mainController.llmFunctions).map(([key, data]) => {
-            if (apiType === 'qwen') {
-                let openaiFuncDef: any = {
-                    name: key,
-                    description: data.description,
-                    parameters: data.params,
-                };
-
-                if (openaiFuncDef.displayName) {
-                    openaiFuncDef.name_for_human = data.displayName;
-                }
-
-                return openaiFuncDef;
-            } else {
-                let requiredParams = [];
-                let paramsSchema: Record<string, any> = {};
-
-                for (let param of data.params ?? []) {
-                    const paramName = param.name;
-                    paramsSchema[paramName] = {
-                        description: param.description,
-                        type: param.schema?.type ?? 'string',
-                    };
-
-                    if (param.required) {
-                        requiredParams.push(paramName);
-                    }
-                }
-
-                return {
-                    type: 'function',
-                    function: {
-                        name: key,
-                        description: data.description,
-                        parameters: {
-                            type: 'object',
-                            properties: paramsSchema
-                        },
-                        required: requiredParams,
-                    },
-                };
-            }
-        });
-    }
-
-    private async handleLLMFunctions(functionName: string, params: any, message?: CommonReceivedMessage): Promise<FunctionCallingResponse> {
-        let func = this.mainController.llmFunctions[functionName];
-        if (!func) {
-            return { message: '未找到对应的功能。' };
-        }
-
-        if (typeof params === 'string') {
-            params = params.trim();
-            if (params.startsWith('{') && params.endsWith('}')) {
-                try {
-                    params = JSON.parse(params);
-                } catch (e) {
-                    return { message: '参数格式错误。' };
-                }
-            }
-        }
-
-        if (func.callback) {
-            const response = await func.callback(params, message);
-            if (typeof response === 'string') {
-                return {
-                    message: response
-                };
-            } else {
-                return response;
-            }
-        }
-
-        return { message: '此功能暂未实现。' };
     }
 
     public async doApiRequest(messageList: any[], apiConf?: ChatCompleteApiConfig, options: RequestChatCompleteOptions = {}): Promise<ChatGPTApiResponse> {
@@ -345,9 +269,18 @@ export class ChatCompleteApi {
         options: RequestChatCompleteOptions): Promise<ChatGPTApiResponse> {
         
         let maxRounds = 1;
-        if (options.functionCall) {
-            modelOpts.tools = this.getOpenAPIToolDefinition(apiConf.type);
-            maxRounds = 5; // 最多5轮对话
+
+        let functionFilter: string[] | undefined = undefined;
+        if (Array.isArray(options.llmFunctions)) {
+            functionFilter = options.llmFunctions;
+        }
+        
+        if (options.llmFunctions) {
+            let toolList = options.llmFunctions.getOpenAPIToolDefinition(apiConf.type);
+            if (toolList.length > 0) {
+                modelOpts.tools = toolList;
+                maxRounds = 5; // 最多5轮对话
+            }
         }
 
         for (let i = 0; i < maxRounds; i++) {
@@ -408,7 +341,9 @@ export class ChatCompleteApi {
                         const funcParams = firstChoice.message.function_call.arguments;
 
                         this.logger.debug(`开始函数调用：${funcName}(${funcParams})`);
-                        const funcResponse = await this.handleLLMFunctions(funcName, funcParams, options.receivedMessage);
+                        const funcResponse = await options.llmFunctions?.call(funcName, funcParams, options.receivedMessage) ?? {
+                            message: '函数未实现',
+                        };
                         let funcResponseTokens = gptEncode(funcResponse.message).length;
                         this.logger.debug(`函数调用结果：${funcResponse.message}`);
 
@@ -446,17 +381,25 @@ export class ChatCompleteApi {
                                 const functionParams = toolCall.function.arguments;
 
                                 this.logger.debug(`开始函数调用：${functionName}(${functionParams})`);
-                                const funcResponse = await this.handleLLMFunctions(functionName, functionParams, options.receivedMessage);
+                                const funcResponse = await options.llmFunctions?.call(functionName, functionParams, options.receivedMessage) ?? {
+                                    message: '函数未实现',
+                                };
                                 this.logger.debug(`函数调用结果：${funcResponse.message}`);
 
                                 let funcResponseTokens = gptEncode(funcResponse.message).length;
 
-                                messageList.push({
+                                let toolResult: ChatGPTMessageInfo = {
                                     role: 'tool',
                                     name: functionName,
                                     content: funcResponse.message,
                                     tokens: funcResponseTokens,
-                                });
+                                };
+
+                                if (toolCall.id) {
+                                    toolResult.tool_call_id = toolCall.id;
+                                }
+
+                                messageList.push(toolResult);
                             }
                         }
                     }

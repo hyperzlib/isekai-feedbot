@@ -64,7 +64,8 @@ export type ListenSystemEventsFunc = {
      * @param callback Callback function
      * @param options Options
      */
-    <Callback extends CallableFunction = CallableFunction>(event: string, callback: Callback, options?: MessageEventOptions): void;
+    <EventDef extends [string, CallableFunction] = [string, CallableFunction]>
+    (event: EventDef[0], callback: EventDef[1], options?: MessageEventOptions): void;
 };
 
 export type ListenHookEventsFunc = {

@@ -10,6 +10,8 @@ import { InternalLLMFunction } from "./api/InternalLLMFunction";
 import { ChatCompleteApi, ChatGPTApiResponse, RequestChatCompleteOptions } from "./api/ChatCompleteApi";
 import { Robot } from "#ibot/robot/Robot";
 import { splitPrefix } from "#ibot/utils";
+import { LLMFunctionContainer } from "./api/LLMFunction";
+import { OpenAIGetGlobalLLMFunctions } from "./types/events";
 
 export type ChatGPTApiMessage = {
     role: 'summary' | 'assistant' | 'user' | 'function' | 'tool',
@@ -17,6 +19,7 @@ export type ChatGPTApiMessage = {
     name?: string,
     func_call?: any,
     tool_calls?: any,
+    tool_call_id?: string,
 }
 
 export type ChatGPTMessageInfo = ChatGPTApiMessage & {
@@ -53,18 +56,6 @@ export type ChatGPTCompletionOptions = {
     singleton?: boolean,
     regenerate?: boolean,
     character?: string,
-};
-
-export type FunctionCallingResponse = {
-    message: string,
-    directOutput?: boolean,
-};
-
-export type FunctionCallingDefinition = {
-    displayName?: string,
-    description: string,
-    params?: any[],
-    callback?: (params: any, message?: CommonReceivedMessage) => Promise<string | FunctionCallingResponse>,
 };
 
 const defaultConfig = {
@@ -163,8 +154,6 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
     private chatGenerating = false;
     private messageGroup: Record<string, RandomMessage> = {}
 
-    public llmFunctions: Record<string, FunctionCallingDefinition> = {};
-
     // 子模块
     public internalLLMFunction?: InternalLLMFunction;
     public chatCompleteApi?: ChatCompleteApi;
@@ -241,6 +230,9 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 message.sendReply('对话已重置', true),
             ]);
         });
+
+        this.event.on<OpenAIGetGlobalLLMFunctions>('openai/get_global_llm_functions',
+            this.internalLLMFunction.getLLMFunctions.bind(this.internalLLMFunction));
     }
 
     public async destroy(): Promise<void> {
@@ -252,10 +244,6 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         for (let [key, value] of Object.entries(this.config.messages)) {
             this.messageGroup[key] = new RandomMessage(value);
         }
-    }
-
-    public registerLLMFunction(name: string, def: FunctionCallingDefinition) {
-        this.llmFunctions[name] = def;
     }
 
     public getDateStr(date?: Date) {
@@ -281,6 +269,18 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
     public getApiConfigById(id: string) {
         return this.config.api.find((data) => data.id === id) ?? this.config.api[0];
+    }
+
+    public async getLLMFunctions(message?: CommonReceivedMessage) {
+        let functionContainer = new LLMFunctionContainer();
+
+        await this.event.emit('openai/get_global_llm_functions', functionContainer);
+
+        if (message) {
+            await this.event.emit('openai/get_llm_functions', message, functionContainer);
+        }
+
+        return functionContainer;
     }
 
     private async compressConversation(messageLogList: ChatGPTMessageInfo[], characterConf: CharacterConfig) {
@@ -409,7 +409,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         return ret.replace(/\n/g, '\n\n');
     }
 
-    public doApiRequest(messageList: any[], apiConf?: ChatCompleteApiConfig, options: RequestChatCompleteOptions = {}): Promise<ChatGPTApiResponse> {
+    public  doApiRequest(messageList: any[], apiConf?: ChatCompleteApiConfig, options: RequestChatCompleteOptions = {}): Promise<ChatGPTApiResponse> {
         return this.chatCompleteApi!.doApiRequest(messageList, apiConf, options);
     }
 
@@ -576,6 +576,8 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
 
             let reqMessageList = this.buildMessageList(content, messageLogList, characterConf, false);
 
+            const llmFunctions = await this.getLLMFunctions(message);
+
             let replyRes: ChatGPTApiResponse | undefined = undefined;
             if (isStream) {
                 // 处理流式输出
@@ -590,6 +592,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 replyRes = await this.chatCompleteApi!.doApiRequest(reqMessageList, apiConf, {
                     onMessage: onResultMessage,
                     receivedMessage: message,
+                    llmFunctions,
                 });
                 replyRes.outputMessage = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.outputMessage) : replyRes.outputMessage;
                 if (this.app.debug) {
@@ -598,6 +601,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             } else {
                 replyRes = await this.chatCompleteApi!.doApiRequest(reqMessageList, apiConf, {
                     receivedMessage: message,
+                    llmFunctions,
                 });
 
                 replyRes.outputMessage = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.outputMessage) : replyRes.outputMessage;
@@ -609,7 +613,10 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                 if (characterConf.self_suggestion_prompt && this.shouldSelfSuggestion(replyRes.outputMessage)) {
                     this.app.logger.debug('需要重写回答');
                     reqMessageList = this.buildMessageList(replyRes.outputMessage, messageLogList, characterConf, true);
-                    replyRes = await this.chatCompleteApi!.doApiRequest(reqMessageList, apiConf);
+                    replyRes = await this.chatCompleteApi!.doApiRequest(reqMessageList, apiConf, {
+                        receivedMessage: message,
+                        llmFunctions,
+                    });
                     if (this.app.debug) {
                         console.log(replyRes);
                     }
