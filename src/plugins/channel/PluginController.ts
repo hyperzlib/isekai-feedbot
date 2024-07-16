@@ -437,7 +437,7 @@ export default class ChannelFrameworkController extends PluginController<typeof 
         }
 
         try {
-            this.event.emit('channel/subscribe', {
+            this.event.emit('channel/subscribe', {}, {
                 channelType,
                 channelId,
                 count: subscribedCount,
@@ -481,7 +481,7 @@ export default class ChannelFrameworkController extends PluginController<typeof 
             this.subscribeConfig.lazySave();
 
             try {
-                await this.event.emit('channel/unsubscribe', {
+                await this.event.emit('channel/unsubscribe', {}, {
                     channelType,
                     channelId,
                     count: subscribedCount,

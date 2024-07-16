@@ -1,4 +1,4 @@
-import { EventManager } from "./EventManager";
+import { EventManager, EventMeta } from "./EventManager";
 import { CommonReceivedMessage } from "./message/Message";
 import fs from 'fs';
 import fsAsync from 'fs/promises';
@@ -13,7 +13,7 @@ import { Reactive } from "./utils/reactive";
 import { PluginController, PluginIndexFileType } from "#ibot-api/PluginController";
 import { PluginApiBridge } from "./plugin/PluginApiBridge";
 import { compareObject, prepareDir } from "./utils";
-import { ListenEventsFunc } from "./types/event";
+import { CommandEvent, ListenEventsFunc } from "./types/event";
 
 export const MessagePriority = {
     LOWEST: 0,
@@ -125,6 +125,8 @@ export class PluginManager extends EventEmitter {
         }
 
         await this.initPlugins();
+
+        this.app.event.emit('plugin/initialized', {});
 
         await this.app.role.onPluginLoaded();
 
@@ -527,33 +529,8 @@ export class EventScope {
      * @param args Arguments
      * @returns 
      */
-    public async emit(event: string, ...args: any[]) {
-        let isResolved = false;
-
-        const resolved = () => {
-            isResolved = true;
-        };
-
-        if (event in this.eventList) {
-            if (!this.eventSorted[event]) { // 如果事件未排序，触发排序
-                this.eventList[event].sort((a, b) => {
-                    return a.priority - b.priority;
-                });
-            }
-
-            for (const eventInfo of this.eventList[event]) {
-                try {
-                    await eventInfo.callback(...args, resolved);
-                    if (isResolved) {
-                        break;
-                    }
-                } catch (err) {
-                    this.app.logger.error(err);
-                }
-            }
-        }
-
-        return isResolved;
+    public async emit(event: string, meta: EventMeta, ...args: any[]) {
+        return await this.eventManager.emit(event, meta, ...args);
     }
 
     /**
@@ -591,10 +568,10 @@ export class EventScope {
 
         // 注册消息事件
         this.commandList.push(commandInfo as any);
-        this.on(`command/${commandInfo.command}`, callback, options);
+        this.on<CommandEvent>(`command/${commandInfo.command}`, callback, options);
         if (Array.isArray(commandInfo.alias)) { // Add event for alias
             commandInfo.alias.forEach((cmd) => {
-                this.on(`command/${cmd.toLocaleLowerCase()}`, callback, options);
+                this.on<CommandEvent>(`command/${cmd.toLocaleLowerCase()}`, callback, options);
             });
         }
         

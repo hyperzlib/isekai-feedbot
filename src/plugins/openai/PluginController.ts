@@ -274,10 +274,10 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
     public async getLLMFunctions(message?: CommonReceivedMessage) {
         let functionContainer = new LLMFunctionContainer();
 
-        await this.event.emit('openai/get_global_llm_functions', functionContainer);
+        await this.event.emit('openai/get_global_llm_functions', {}, functionContainer);
 
         if (message) {
-            await this.event.emit('openai/get_llm_functions', message, functionContainer);
+            await this.event.emit('openai/get_llm_functions', { sender: message.sender }, functionContainer);
         }
 
         return functionContainer;

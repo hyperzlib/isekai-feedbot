@@ -1,70 +1,22 @@
 import { MessageCallback, MessageEventOptions, RawEventCallback } from "#ibot/PluginManager";
 
+export type PrivateMessageEvent = ['message/private', MessageCallback];
+export type GroupMessageEvent = ['message/group', MessageCallback];
+export type ChannelMessageEvent = ['message/channel', MessageCallback];
+export type FocusedMessageEvent = ['message/focused', MessageCallback];
+export type MessageEvent = ['message', MessageCallback];
+export type RawMessageEvent = ['raw/message', MessageCallback];
+export type BotRawEventEvent = ['raw/event', MessageCallback];
+export type ConfigUpdatedEvent = ['configUpdated', (config: any) => void];
+export type PluginInitializedEvent = ['plugin/initialized', () => void];
+
+export type InternalEvents = PrivateMessageEvent | GroupMessageEvent | ChannelMessageEvent | FocusedMessageEvent | MessageEvent | RawMessageEvent |
+    BotRawEventEvent | ConfigUpdatedEvent | PluginInitializedEvent;
+    
+export type CommandEvent = [string, MessageCallback];
+
 export type ListenSystemEventsFunc = {
-    /**
-     * Add private message handler.
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    (event: 'message/private', callback: MessageCallback, options?: MessageEventOptions): void;
-    /**
-     * Add group message handler.
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    (event: 'message/group', callback: MessageCallback, options?: MessageEventOptions): void;
-    /**
-     * Add channel message handler.
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    (event: 'message/channel', callback: MessageCallback, options?: MessageEventOptions): void;
-    /**
-     * Add focused message handle.
-     * will be trigger on private message or group message with mentions to robot
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    (event: 'message/focused', callback: MessageCallback, options?: MessageEventOptions): void;
-    /**
-     * Add message handler.
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    (event: 'message', callback: MessageCallback, options?: MessageEventOptions): void;
-    /**
-     * Add raw message handler.
-     * Will be triggered even when the message is a command.
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    (event: 'raw/message', callback: MessageCallback, options?: MessageEventOptions): void;
-    /**
-     * Add robot raw event handler.
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    (event: 'raw/event', callback: RawEventCallback, options?: MessageEventOptions): void;
-    /**
-     * Add config updated handler.
-     * @param event Event name
-     * @param callback Callback function
-     */
-    (event: 'configUpdated', callback: (config: any) => void): void;
-    /**
-     * Add event handler.
-     * @param event Event name
-     * @param callback Callback function
-     * @param options Options
-     */
-    <EventDef extends [string, CallableFunction] = [string, CallableFunction]>
+    <EventDef extends [string, CallableFunction] = InternalEvents>
     (event: EventDef[0], callback: EventDef[1], options?: MessageEventOptions): void;
 };
 

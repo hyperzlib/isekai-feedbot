@@ -2,10 +2,10 @@ import TelegramBot from "node-telegram-bot-api";
 import App from "../../App";
 import { RobotConfig } from "../../types/config";
 import { CommonSendMessage } from "../../message/Message";
-import { ChatIdentity } from "../../message/Sender";
-import { CommandInfo } from "../../PluginManager";
+import { CommandInfo, EventScope } from "../../PluginManager";
 import { RobotAdapter } from "../Robot";
 import { asleep } from "#ibot/utils";
+import { PluginInitializedEvent } from "#ibot/types/event";
 
 export type TelegramRobotConfig = RobotConfig & {
     token: string;
@@ -21,6 +21,7 @@ export default class TelegramRobot implements RobotAdapter {
     public description: string;
 
     private bot: TelegramBot;
+    private events: EventScope;
 
     constructor(app: App, robotId: string, config: TelegramRobotConfig) {
         this.app = app;
@@ -36,12 +37,17 @@ export default class TelegramRobot implements RobotAdapter {
                 proxy: config.proxy
             };
         }
+
         this.bot = new TelegramBot(config.token, botOptions);
-        
+        this.events = new EventScope(this.app, 'bot/telegram', 'main');
+
+        this.events.on<PluginInitializedEvent>('plugin/initialized', async () => {
+            await this.initCommands();
+        });
     }
 
     async initialize() {
-        await this.initCommands();
+        
     }
 
     async initCommands() {
