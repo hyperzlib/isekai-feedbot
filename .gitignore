@@ -3,10 +3,13 @@ subscribe.yaml
 user-role.yaml
 node_modules/
 channel-backup/
-dist/
 *.zip
 *.tar.gz
-configs/
-config/
-data/
+
+/dist/
+/configs/
+/config/
+/data/
+/cache/
+
 parserTest.js

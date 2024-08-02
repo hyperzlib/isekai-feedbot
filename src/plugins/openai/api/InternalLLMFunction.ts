@@ -3,6 +3,9 @@ import got from "got";
 import ChatGPTController from "../PluginController";
 import { CommonReceivedMessage } from "#ibot/message/Message";
 import { LLMFunctionContainer } from "./LLMFunction";
+import { DashScopeMultiModelMessageItem } from "./ChatCompleteApi";
+import { readFile } from "fs/promises";
+import { detectImageType } from "#ibot/utils/file";
 
 export class InternalLLMFunction {
     public app: App;
@@ -41,7 +44,7 @@ export class InternalLLMFunction {
             params: [
                 {
                     name: "image_url",
-                    description: "图片的URL地址。",
+                    description: "图片的URL地址或者文件地址。",
                     required: true,
                     schema: { "type": "string" },
                 },
@@ -52,9 +55,7 @@ export class InternalLLMFunction {
                     schema: { "type": "string" },
                 }
             ],
-            callback: async (params: any) => {
-                return '抱歉，识别图片功能尚未实现。';
-            },
+            callback: this.recognizeImage.bind(this),
         })
     }
 
@@ -127,6 +128,60 @@ export class InternalLLMFunction {
                 return '无法访问网络搜索API，错误：' + e.message;
             }
             return '无法访问网络搜索API';
+        }
+    }
+
+    public async recognizeImage(params: any): Promise<string> {
+        if (!params.image_url) {
+            return '请提供图片的URL地址。';
+        }
+
+        let imageUrl: string = params.image_url;
+        let question = params.question ?? '图片上有什么？';
+
+        let apiConf = this.mainController.getApiConfigById('image_recognition');
+        if (!apiConf) {
+            return '未配置图片识别API';
+        }
+
+        try {
+            if (imageUrl.startsWith('file://')) {
+                let imagePath = imageUrl.replace('file://', '');
+                let imageBuffer = await readFile(imagePath);
+                let imageType = detectImageType(imageBuffer) ?? 'image/png';
+
+                imageUrl = await this.mainController
+                    .chatCompleteApi!.uploadDashScopeFile(imageBuffer, imageType, apiConf);
+            }
+
+            let res = await this.mainController.doApiRequest([
+                {
+                    role: 'system',
+                    content: [
+                        { text: 'You are a helpful assistant.' }
+                    ]
+                },
+                {
+                    role: 'user',
+                    content: [
+                        { image: imageUrl },
+                        { text: question }
+                    ],
+                }
+            ] as DashScopeMultiModelMessageItem[], apiConf);
+
+            this.mainController.logger.debug(`识图结果：${res.outputMessage}`);
+
+            return res.outputMessage;
+        } catch (err: any) {
+            this.mainController.logger.error(`图片识别失败: ${err.message}`);
+            console.error(err);
+
+            if (err.name === 'HTTPError' && err.response) {
+                console.error('Error Response: ', err.response?.body);
+            }
+
+            return `图片识别失败: ${err.message}`;
         }
     }
 }

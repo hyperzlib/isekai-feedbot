@@ -174,14 +174,24 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                             if (chunkData.data.qq == bot.userId) { // 如果是@机器人
                                 message.mentionedReceiver = true;
                             } else { // @其他人的情况
-                                message.mention(chunkData.data.qq);
-                                message.content.push({
-                                    type: ['mention'],
-                                    text: `[@${chunkData.data.qq}]`,
-                                    data: {
-                                        userId: chunkData.data.qq,
-                                    }
-                                } as MentionMessage);
+                                if (chunkData.data?.qq === 'all' || chunkData.data?.qq === '0') {
+                                    message.content.push({
+                                        type: ['mention'],
+                                        text: `[@${chunkData.data.qq}]`,
+                                        data: {
+                                            everyone: true,
+                                        }
+                                    } as MentionMessage);
+                                } else {
+                                    message.mention(chunkData.data.qq);
+                                    message.content.push({
+                                        type: ['mention'],
+                                        text: `[@${chunkData.data.qq}]`,
+                                        data: {
+                                            userId: chunkData.data.qq,
+                                        }
+                                    } as MentionMessage);
+                                }
                             }
                         } else {
                             willIgnoreMention = false;
@@ -323,10 +333,19 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
                 }
             });
         } else if (chunk.type.includes('mention')) {
-            msgChunk.push({
-                type: 'at',
-                data: { qq: chunk.data.userId }
-            });
+            if (chunk.data.everyone) {
+                msgChunk.push({
+                    type: 'at',
+                    data: {
+                        qq: 'all'
+                    }
+                });
+            } else {
+                msgChunk.push({
+                    type: 'at',
+                    data: { qq: chunk.data.userId }
+                });
+            }
         } else if (chunk.type.includes('qqforwarding')) {
             // ignore
         } else if (chunk.text !== null) {

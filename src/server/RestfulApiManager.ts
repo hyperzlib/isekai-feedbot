@@ -7,12 +7,10 @@ import { koaBody } from "koa-body";
 import KoaWebsocket from "koa-websocket";
 import * as ws from "ws";
 
-export interface RestfulContext {
+export type RestfulContext = Koa.ParameterizedContext<any, {
     websocket: ws;
-    path: string;
     botContext: App,
-    request: Koa.Request,
-}
+} & Router.IRouterParamContext, any>;
 
 export type FullRestfulContext = RestfulContext & Koa.BaseContext;
 export type RestfulRouter = Router<any, RestfulContext>;
@@ -44,6 +42,12 @@ export class RestfulApiManager {
         this.koa = KoaWebsocket(new Koa());
         this.router = new Router<any, RestfulContext>();
         this.wsRouter = new Router<any, RestfulContext>() as any;
+
+        this.router.get('/', (ctx) => {})
+    }
+
+    get publicAddress() {
+        return this.config.public_address ?? 'http://localhost';
     }
 
     public initialize(): Promise<void> {

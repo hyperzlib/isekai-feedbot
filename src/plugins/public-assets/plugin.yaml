@@ -1,0 +1,5 @@
+id: public_assets
+name: "Public Assets 框架"
+description: "用于让资源文件可以通过公网访问"
+author: "Hyperzlib <hyperzlib@outlook.com>"
+controller: "PluginController"

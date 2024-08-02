@@ -35,7 +35,7 @@ export type RobotConfig = {
 export type RestfulApiConfig = {
     host: string;
     port: number;
-    publicDomain?: string;
+    public_address?: string;
     tokens: { [type: string]: any };
 };
 

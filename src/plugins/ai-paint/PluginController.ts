@@ -135,8 +135,8 @@ export default class StableDiffusionController extends PluginController<typeof d
                 `Negative Prompt: ${repliedMessage.extra.negativePrompt}\n`);
         });
 
-        this.event.on<OpenAIGetLLMFunctions>('openai/get_llm_functions', (_, functios) => {
-            functios.register('generate_image', {
+        this.event.on<OpenAIGetLLMFunctions>('openai/get_llm_functions', (functions) => {
+            functions.register('generate_image', {
                 displayName: '生成图片',
                 description: '当你想生成图片或者绘画时非常有用。',
                 params: [
@@ -286,9 +286,11 @@ export default class StableDiffusionController extends PluginController<typeof d
                 if (replyRes.outputMessage) {
                     let reply = replyRes.outputMessage;
                     this.logger.debug(`ChatGPT返回: ${reply}`);
-                    let matchedJson = reply.match(/\{.*\}/);
+                    let jsonStart = reply.indexOf('{');
+                    let jsonEnd = reply.lastIndexOf('}');
+                    let matchedJson = reply.substring(jsonStart, jsonEnd + 1);
                     if (matchedJson) {
-                        let promptRes = JSON.parse(matchedJson[0]);
+                        let promptRes = JSON.parse(matchedJson);
                         if (promptRes) {
                             prompt = promptRes.prompt;
                             paintSize = promptRes.size;

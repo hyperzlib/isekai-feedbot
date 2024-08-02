@@ -201,6 +201,9 @@ export class EventManager {
                 }
 
                 return true;
+            } else {
+                // 如果没有限定sender则直接返回true
+                return true;
             }
         });
 

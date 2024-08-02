@@ -12,6 +12,9 @@ import { Robot } from "#ibot/robot/Robot";
 import { splitPrefix } from "#ibot/utils";
 import { LLMFunctionContainer } from "./api/LLMFunction";
 import { OpenAIGetGlobalLLMFunctions } from "./types/events";
+import PublicAssetsController from "../public-assets/PluginController";
+import { readFile } from "fs/promises";
+import { detectImageType } from "#ibot/utils/file";
 
 export type ChatGPTApiMessage = {
     role: 'summary' | 'assistant' | 'user' | 'function' | 'tool',
@@ -22,7 +25,7 @@ export type ChatGPTApiMessage = {
     tool_call_id?: string,
 }
 
-export type ChatGPTMessageInfo = ChatGPTApiMessage & {
+export type ChatGPTMessageItem = ChatGPTApiMessage & {
     tokens: number,
 };
 
@@ -34,7 +37,7 @@ export type CharacterConfig = {
     summary_system_prompt: string,
     summary_prompt: string,
     self_suggestion_prompt: string,
-    prepend_messages?: ChatGPTMessageInfo[],
+    prepend_messages?: ChatGPTMessageItem[],
 } & Record<string, any>;
 export type CharactersConfig = Record<string, CharacterConfig>;
 
@@ -283,7 +286,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         return functionContainer;
     }
 
-    private async compressConversation(messageLogList: ChatGPTMessageInfo[], characterConf: CharacterConfig) {
+    private async compressConversation(messageLogList: ChatGPTMessageItem[], characterConf: CharacterConfig) {
         if (messageLogList.length < 4) return messageLogList;
 
         let apiConf = this.getApiConfigById(characterConf.api);
@@ -295,11 +298,19 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         let shouldCompressList = messageLogList.slice(0, -2);
         let newSummary = await this.makeSummary(shouldCompressList, characterConf);
         let newMessageLogList = messageLogList.slice(-2).filter((data) => data.role !== 'summary');
+
+        // 如果newMessageLogList的第一项的role不是user或者assistant则移除
+        let firstRealItem = newMessageLogList.findIndex((message) => message.role === 'user' || message.role === 'assistant');
+
+        newMessageLogList = newMessageLogList.slice(firstRealItem);
+
         newMessageLogList.unshift({
             role: 'summary',
             content: newSummary.message,
             tokens: newSummary.tokens,
         });
+
+        console.log('压缩后的对话：', newMessageLogList);
 
         return newMessageLogList;
     }
@@ -309,7 +320,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
      * @param messageLogList 消息记录列表
      * @returns 
      */
-    private async makeSummary(messageLogList: ChatGPTMessageInfo[], characterConf: CharacterConfig) {
+    private async makeSummary(messageLogList: ChatGPTMessageItem[], characterConf: CharacterConfig) {
         let chatLog: string[] = [];
 
         messageLogList.forEach((messageData) => {
@@ -337,7 +348,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         };
     }
 
-    private buildMessageList(question: string, messageLogList: ChatGPTMessageInfo[], characterConf: CharacterConfig,
+    private buildMessageList(question: string, messageLogList: ChatGPTMessageItem[], characterConf: CharacterConfig,
         selfSuggestion: boolean) {
 
         let messageList: any[] = [];
@@ -395,12 +406,13 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
     }
 
     private async messageChunksToMarkdown(messageChunks: MessageChunk[], robot: Robot) {
+        let assetsStore = this.app.getPlugin<PublicAssetsController>('public_assets');
         let ret = '';
         for (let chunk of messageChunks) {
             if (chunk.type.includes('image')) {
                 const imgChunk = chunk as ImageMessage;
                 
-                ret += `![${imgChunk.data.alt ?? '图片'}](${imgChunk.data.url})\n`;
+                ret += `![图片](${imgChunk.data.url})\n`;
             } else {
                 ret += chunk.text ?? '';
             }
@@ -481,6 +493,8 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             apiConf = this.getApiConfigById(characterConf.api);
         }
 
+        this.app.logger.debug(`ChatGPT API 收到提问：${content}`);
+
         this.app.logger.debug(`ChatGPT API 收到提问。当前人格：${character}`);
 
         const userSessionStore = message.session.user;
@@ -495,7 +509,7 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
         await userSessionStore.addRequestCount(this.SESSION_KEY_MESSAGE_COUNT, this.config.rate_limit_minutes * 60);
 
         // 获取记忆
-        let messageLogList = await message.session.chat.get<ChatGPTMessageInfo[]>(this.SESSION_KEY_API_CHAT_LOG);
+        let messageLogList = await message.session.chat.get<ChatGPTMessageItem[]>(this.SESSION_KEY_API_CHAT_LOG);
         if (!Array.isArray(messageLogList)) {
             messageLogList = [];
         }

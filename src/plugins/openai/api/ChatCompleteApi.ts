@@ -1,17 +1,23 @@
 import App from "#ibot/App";
 import { CommonReceivedMessage } from "#ibot/message/Message";
 import { fetchEventSource, FetchEventSourceInit } from "@waylaidwanderer/fetch-event-source";
-import ChatGPTController, { ChatCompleteApiConfig, ChatGPTApiMessage, ChatGPTMessageInfo } from "../PluginController";
+import ChatGPTController, { ChatCompleteApiConfig, ChatGPTApiMessage, ChatGPTMessageItem } from "../PluginController";
 import { ProxyAgent } from "undici"; 
 import { encode as gptEncode } from 'gpt-3-encoder';
 import { asleep, Logger, MessageTypingSimulator } from "#ibot/utils";
 import got, { OptionsOfTextResponseBody } from "got";
 import { HttpsProxyAgent } from "hpagent";
-import { randomInt } from "crypto";
+import { randomInt, randomUUID } from "crypto";
+import FormData from "form-data";
 import { LLMFunctionContainer } from "./LLMFunction";
 
+export type DashScopeMultiModelMessageItem = {
+    role: string,
+    content: Record<string, any>[],
+} & Record<string, any>;
+
 export type ChatGPTApiResponse = {
-    messageList: ChatGPTMessageInfo[],
+    messageList: any[],
     outputMessage: string,
     totalTokens: number,
 };
@@ -61,6 +67,8 @@ export class ChatCompleteApi {
                 return `${apiConf.endpoint}/v1/chat/completions`;
             case 'azure':
                 return `${apiConf.endpoint}/openai/deployments/${apiConf.deployment}/chat/completions?api-version=2023-05-15`;
+            case 'dashscope-multimodel':
+                return `${apiConf.endpoint}/v1/services/aigc/multimodal-generation/generation`;
         }
 
         throw new Error('Unknown API type: ' + apiConf.type);
@@ -81,12 +89,14 @@ export class ChatCompleteApi {
             case 'openai':
             case 'azure':
                 return await this.doOpenAILikeApiRequest(messageList, apiConf, options);
+            case 'dashscope-multimodel':
+                return await this.doDashScopeMultiModelApiRequest(messageList, apiConf, options);
         }
 
         throw new Error('Unknown API type: ' + apiConf.type);
     }
 
-    private async internalOpenAILikeStreamApiRequest(modelOpts: any, messageList: ChatGPTMessageInfo[], apiConf: ChatCompleteApiConfig,
+    private async internalOpenAILikeStreamApiRequest(modelOpts: any, messageList: ChatGPTMessageItem[], apiConf: ChatCompleteApiConfig,
         options: RequestChatCompleteOptions): Promise<ChatGPTApiResponse> {
         
         // Stream API 暂且不支持function call
@@ -265,7 +275,7 @@ export class ChatCompleteApi {
         throw new ChatGPTAPIError('API请求失败', 'api_request_failed');
     }
 
-    private async internalOpenAILikeApiRequest(modelOpts: any, messageList: ChatGPTMessageInfo[], apiConf: ChatCompleteApiConfig,
+    private async internalOpenAILikeApiRequest(modelOpts: any, messageList: ChatGPTMessageItem[], apiConf: ChatCompleteApiConfig,
         options: RequestChatCompleteOptions): Promise<ChatGPTApiResponse> {
         
         let maxRounds = 1;
@@ -388,7 +398,7 @@ export class ChatCompleteApi {
 
                                 let funcResponseTokens = gptEncode(funcResponse.message).length;
 
-                                let toolResult: ChatGPTMessageInfo = {
+                                let toolResult: ChatGPTMessageItem = {
                                     role: 'tool',
                                     name: functionName,
                                     content: funcResponse.message,
@@ -469,5 +479,146 @@ export class ChatCompleteApi {
         } else {
             return await this.internalOpenAILikeApiRequest(modelOpts, messageList, apiConf, options);
         }
+    }
+
+    public async uploadDashScopeFile(fileContent: Buffer, fileMimeType: string, apiConf: ChatCompleteApiConfig): Promise<string> {
+        let getPolicyOpts: OptionsOfTextResponseBody = {
+            searchParams: {
+                action: 'getPolicy',
+                model: apiConf.model_options.model
+            },
+            headers: {
+                Authorization: `Bearer ${apiConf.token}`,
+            }
+        };
+
+        const proxyConfig = apiConf.proxy ?? this.mainController.config.proxy;
+        if (proxyConfig) {
+            getPolicyOpts.agent = {
+                https: new HttpsProxyAgent({
+                    keepAlive: true,
+                    keepAliveMsecs: 1000,
+                    maxSockets: 256,
+                    maxFreeSockets: 256,
+                    scheduling: 'lifo',
+                    proxy: proxyConfig,
+                }) as any,
+            }
+        }
+        // 获取上传文件凭证
+        let apiUrl = `${apiConf.endpoint}/v1/uploads`;
+        this.app.logger.debug(`DashScope API 请求地址：${apiUrl}`);
+
+        let getPolicyRes = await got.get(apiUrl, getPolicyOpts).json<any>();
+        
+        // 上传文件到OSS
+        let policy: string = getPolicyRes.data?.policy;
+        let signature: string = getPolicyRes.data?.signature;
+        let uploadDir: string = getPolicyRes.data?.upload_dir;
+        let uploadHost: string = getPolicyRes.data?.upload_host;
+        let ossAccessKeyId: string = getPolicyRes.data?.oss_access_key_id;
+        let xOssObjectAcl: string = getPolicyRes.data?.x_oss_object_acl;
+        let xOssForbidOverwrite: string = getPolicyRes.data?.x_oss_forbid_overwrite;
+
+        let fileName = `${randomUUID()}.${fileMimeType.split('/')[1]}`;
+        let filePath = uploadDir + '/' + fileName;
+
+        let formData = new FormData();
+        formData.append('OSSAccessKeyId', ossAccessKeyId);
+        formData.append('Signature', signature);
+        formData.append('policy', policy);
+        formData.append('x-oss-object-acl', xOssObjectAcl);
+        formData.append('x-oss-forbid-overwrite', xOssForbidOverwrite);
+        formData.append('key', filePath);
+        formData.append('success_action_status', '200');
+        formData.append('file', fileContent, {
+            filename: fileName,
+            contentType: fileMimeType,
+        });
+
+        await got.post(uploadHost, {
+            body: formData.getBuffer(),
+            headers: formData.getHeaders(),
+        });
+
+        return 'oss://' + filePath;
+    }
+
+    public async doDashScopeMultiModelApiRequest(messageList: DashScopeMultiModelMessageItem[], apiConf: ChatCompleteApiConfig, options: RequestChatCompleteOptions): Promise<ChatGPTApiResponse> {
+        let modelOpts = Object.fromEntries(Object.entries({
+            temperature: apiConf.model_options.temperature,
+            top_p: apiConf.model_options.top_p,
+            max_tokens: apiConf.model_options.max_output_tokens,
+            presence_penalty: apiConf.model_options.presence_penalty,
+            frequency_penalty: apiConf.model_options.frequency_penalty,
+        }).filter((data) => data[1]));
+        
+        let opts: OptionsOfTextResponseBody = {
+            json: {
+                model: apiConf.model_options.model,
+                parameters: modelOpts,
+                input: {
+                    messages: messageList,
+                },
+            },
+            headers: {
+                'X-DashScope-OssResourceResolve': 'enable',
+                Authorization: `Bearer ${apiConf.token}`,
+            },
+            timeout: 30000,
+        };
+
+        const proxyConfig = apiConf.proxy ?? this.mainController.config.proxy;
+        if (proxyConfig) {
+            opts.agent = {
+                https: new HttpsProxyAgent({
+                    keepAlive: true,
+                    keepAliveMsecs: 1000,
+                    maxSockets: 256,
+                    maxFreeSockets: 256,
+                    scheduling: 'lifo',
+                    proxy: proxyConfig,
+                }) as any,
+            }
+        }
+
+        const apiUrl = this.getChatCompleteApiUrl(apiConf);
+        this.app.logger.debug(`DashScope API 请求地址：${apiUrl}`);
+
+        const res = await got.post(apiUrl, opts).json<any>();
+
+        if (res.error) {
+            throw new ChatGPTAPIError(res.message, res.type);
+        }
+        
+        if (res.output?.choices && Array.isArray(res.output?.choices) && res.output?.choices.length > 0) {
+            const firstChoice = res.output?.choices[0];
+            this.logger.debug('DashScope 返回：' + JSON.stringify(firstChoice, null, 2));
+
+            if (typeof firstChoice.message?.content === 'string') {
+                let completions: string = firstChoice.message.content;
+                let completion_tokens: number = res.usage?.completion_tokens ?? gptEncode(completions).length;
+
+                completions = completions.replace(/(^\n+|\n+$)/g, '');
+
+                messageList = [
+                    ...messageList,
+                    {
+                        role: 'assistant',
+                        content: [
+                            { text: completions }
+                        ],
+                        tokens: completion_tokens,
+                    }
+                ];
+
+                return {
+                    messageList: messageList,
+                    outputMessage: completions,
+                    totalTokens: completion_tokens,
+                };
+            }
+        }
+        throw new ChatGPTAPIError('API请求失败。', 'api_request_failed');
     }
 }

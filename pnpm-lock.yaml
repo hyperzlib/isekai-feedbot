@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@types/form-data':
+        specifier: ^2.5.0
+        version: 2.5.0
       '@waylaidwanderer/fetch-event-source':
         specifier: ^3.0.1
         version: 3.0.1
@@ -29,6 +32,9 @@ importers:
       fast-xml-parser:
         specifier: ^4.4.0
         version: 4.4.0
+      form-data:
+        specifier: ^4.0.0
+        version: 4.0.0
       got:
         specifier: ^11.8.6
         version: 11.8.6
@@ -362,6 +368,10 @@ packages:
 
   '@types/express@4.17.21':
     resolution: {integrity: sha512-ejlPM315qwLpaQlQDTjPdsUFSc6ZsP4AN6AlWnogPjQ7CVi7PYF3YVz+CY3jE2pwYf7E/7HlDAN0rV2GxTG0HQ==}
+
+  '@types/form-data@2.5.0':
+    resolution: {integrity: sha512-23/wYiuckYYtFpL+4RPWiWmRQH2BjFuqCUi2+N3amB1a1Drv+i/byTrGvlLwRVLFNAZbwpbQ7JvTK+VCAPMbcg==}
+    deprecated: This is a stub types definition. form-data provides its own type definitions, so you do not need this installed.
 
   '@types/formidable@2.0.6':
     resolution: {integrity: sha512-L4HcrA05IgQyNYJj6kItuIkXrInJvsXTPC5B1i64FggWKKqSL+4hgt7asiSNva75AoLQjq29oPxFfU4GAQ6Z2w==}
@@ -3283,6 +3293,10 @@ snapshots:
       '@types/express-serve-static-core': 4.17.43
       '@types/qs': 6.9.14
       '@types/serve-static': 1.15.5
+
+  '@types/form-data@2.5.0':
+    dependencies:
+      form-data: 4.0.0
 
   '@types/formidable@2.0.6':
     dependencies:

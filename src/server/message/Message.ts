@@ -64,8 +64,9 @@ export interface AttachmentMessage extends MessageChunk {
 
 export interface MentionMessage extends MessageChunk {
     data: {
-        userId: string;
+        userId?: string;
         name?: string;
+        everyone: boolean;
     };
 }
 
@@ -249,6 +250,9 @@ export class CommonSendMessage extends CommonMessage {
 
     /** 回复的消息 */
     repliedMessage?: CommonSendMessage | CommonReceivedMessage;
+
+    /** 附加操作的ID */
+    interactionId?: string;
 
     /** 发送时间 */
     time: Date = new Date();

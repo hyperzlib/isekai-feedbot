@@ -15,7 +15,6 @@ export interface RobotAdapter {
     description?: string;
     initialize?: (wrapper: Robot<RobotAdapter>) => Promise<any>;
     destroy?: () => Promise<any>;
-    setCommands?(commands: CommandInfo[]): Promise<any>;
     markRead?(message: CommonReceivedMessage): Promise<boolean>;
     sendTyping?(chatIdentity: ChatIdentity, typing: boolean): Promise<boolean>;
     sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
@@ -70,15 +69,6 @@ export class Robot<Adapter extends RobotAdapter = any> {
     public getSession(chatIdentity: ChatIdentity, type: string) {
         const sessionPath = this.app.robot.getSessionPath(chatIdentity, type);
         return this.app.cache.getStore(sessionPath);
-    }
-
-    /**
-     * 设置机器人指令信息（用于某些协议在聊天窗口显示机器人指令列表）
-     * @param commands 
-     * @returns 
-     */
-    public setCommands(commands: CommandInfo[]): Promise<any> {
-        return this.adapter.setCommands ? this.adapter.setCommands(commands) : Promise.resolve();
     }
 
     /**

@@ -1,11 +1,13 @@
 import TelegramBot from "node-telegram-bot-api";
 import App from "../../App";
 import { RobotConfig } from "../../types/config";
-import { CommonSendMessage } from "../../message/Message";
+import { CommonMessage, CommonReceivedMessage, CommonSendMessage, MessageChunk } from "../../message/Message";
 import { CommandInfo, EventScope } from "../../PluginManager";
 import { RobotAdapter } from "../Robot";
 import { asleep } from "#ibot/utils";
 import { PluginInitializedEvent } from "#ibot/types/event";
+import { BaseSender, ChannelInfoType, ChatIdentity, GroupInfoType, GroupUserInfoType, RootGroupInfoType, UserInfoType } from "#ibot/message/Sender";
+import { MessageSchemaType } from "#ibot/odm/Message";
 
 export type TelegramRobotConfig = RobotConfig & {
     token: string;
@@ -23,7 +25,7 @@ export default class TelegramRobot implements RobotAdapter {
     private bot: TelegramBot;
     private events: EventScope;
 
-    constructor(app: App, robotId: string, config: TelegramRobotConfig) {
+    public constructor(app: App, robotId: string, config: TelegramRobotConfig) {
         this.app = app;
         
         this.robotId = robotId;
@@ -45,12 +47,40 @@ export default class TelegramRobot implements RobotAdapter {
             await this.initCommands();
         });
     }
+    destroy?: (() => Promise<any>) | undefined;
+    sendMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
+        throw new Error("Method not implemented.");
+    }
+    retrieveMediaUrl?(mediaMessageChunk: MessageChunk): Promise<void> {
+        throw new Error("Method not implemented.");
+    }
+    getUsersInfo?(userIds: string[]): Promise<(UserInfoType | null)[]> {
+        throw new Error("Method not implemented.");
+    }
+    getGroupInfo?(groupId: string, rootGroupId?: string): Promise<GroupInfoType | null> {
+        throw new Error("Method not implemented.");
+    }
+    getRootGroupInfo?(rootGroupId: string): Promise<RootGroupInfoType | null> {
+        throw new Error("Method not implemented.");
+    }
+    getChannelInfo?(channelId: string): Promise<ChannelInfoType | null> {
+        throw new Error("Method not implemented.");
+    }
+    getGroupUsersInfo?(userIds: string[], groupId: string, rootGroupId?: string): Promise<(GroupUserInfoType | null)[]> {
+        throw new Error("Method not implemented.");
+    }
+    kickGroupUser?(groupId: string, userId: string): Promise<boolean> {
+        throw new Error("Method not implemented.");
+    }
+    parseDBMessage?(dbMessage: MessageSchemaType): Promise<CommonMessage> {
+        throw new Error("Method not implemented.");
+    }
 
-    async initialize() {
+    public async initialize() {
         
     }
 
-    async initCommands() {
+    public async initCommands() {
         this.bot.setMyCommands([
             { command: 'start', description: '显示机器人简介信息' },
             { command: 'getchatid', description: '获取当前会话的id' }
@@ -69,39 +99,39 @@ export default class TelegramRobot implements RobotAdapter {
         });
     }
 
-    async setCommands(commands: CommandInfo[]) {
-        /*
-        let botCommands: TelegramBot.BotCommand[] = [];
-        for (let command of commands) {
-            botCommands.push({
-                command: command.command,
-                description: command.help ?? command.name
-            });
-        }
-        await this.bot.setMyCommands(botCommands);
-        */
+    private getChatIdFromMessage(message: CommonReceivedMessage) {
+        const sender = message.sender as BaseSender;
+        return sender.targetId;
     }
 
-    /**
-     * 发送群消息
-     */
-    async sendToChat(chatId: number|number[], message: string) {
-        if(Array.isArray(chatId)){ //发送给多个群组的处理
-            for (let one of chatId) {
-                await this.sendToChat(one, message);
-                await asleep(100);
-            }
-            return;
+    private getTargetChatId(chatIdentity: ChatIdentity) {
+        switch (chatIdentity.type) {
+            case 'private':
+                return chatIdentity.userId!;
+            case 'group':
+                return chatIdentity.groupId!;
+            case 'channel':
+                return chatIdentity.channelId!;
         }
 
-        return await this.bot.sendMessage(chatId, message);
+        return '';
     }
 
-    /**
-     * 发送消息
-     * @param message 
-     */
-    async sendMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
-        return message;
+    public async markRead(message: CommonReceivedMessage): Promise<boolean> {
+        return true;
+    }
+
+    public async sendTyping(chatIdentity: ChatIdentity, typing: boolean): Promise<boolean> {
+        if (typing) {
+            const chatId = this.getTargetChatId(chatIdentity);
+            this.bot.sendChatAction(chatId, 'typing');
+        }
+
+        return true;
+    }
+
+    public async deleteMessage(chatIdentity: ChatIdentity, messageId: string): Promise<boolean> {
+        const chatId = this.getTargetChatId(chatIdentity);
+        return await this.bot.deleteMessage(chatId, messageId);
     }
 }

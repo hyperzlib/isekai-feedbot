@@ -1,6 +1,7 @@
 import koa from "koa";
 import got, { TimeoutError } from "got/dist/source";
 import * as ws from "ws";
+import * as fs from "fs";
 
 import App from "../../App";
 import { Robot, RobotAdapter } from "../Robot";
@@ -11,9 +12,11 @@ import { RobotConfig } from "../../types/config";
 import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
 import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
-import { PluginController } from "#ibot-api/PluginController";
 import { asleep } from "#ibot/utils";
 import { randomUUID } from "crypto";
+import path from "path";
+import { detectImageType } from "#ibot/utils/file";
+import { CronJob } from "cron";
 
 export type QQRobotConfig = RobotConfig & {
     userId: string;
@@ -39,6 +42,10 @@ export type QueryQueueItem = {
 }
 
 export default class QQRobot implements RobotAdapter {
+    public readonly IMG_CACHE_EXPIRE = 7 * 86400 * 1000; // 7天
+
+    public imgCleanupTask?: CronJob;
+
     public type = 'qq';
 
     public userId: string;
@@ -102,6 +109,12 @@ export default class QQRobot implements RobotAdapter {
         this.socketQueueCleanerTaskId = setInterval(() => {
             this.cleanSocketQueryQueue();
         }, 1000);
+
+        this.imgCleanupTask = new CronJob('0 0 0 * * *', async () => {
+            await this.cleanImageCache();
+        });
+
+        await this.cleanImageCache();
     }
 
     async destroy() {
@@ -305,6 +318,9 @@ export default class QQRobot implements RobotAdapter {
             }
 
             if (message) {
+                // 下载图片
+                await this.downloadImages(message.content);
+
                 // 保存消息
                 let messageRef = this.infoProvider.saveMessage(message);
 
@@ -380,6 +396,74 @@ export default class QQRobot implements RobotAdapter {
         }
         return null;
     }
+
+    async downloadImages(messageContent: MessageChunk[]): Promise<void> {
+        for (let chunk of messageContent) {
+            if (chunk.type.includes('qqimage')) {
+
+                if (chunk.data.url) {
+                    this.app.logger.debug(`正在下载图片：${chunk.data.url}`);
+                    try {
+                        let imgFileName = chunk.data.alt?.toLowerCase() ?? randomUUID();
+
+                        // 使用前2位拆分文件夹
+                        let imgPath = path.join(this.imgCachePath, imgFileName[0], imgFileName.substring(0, 2));
+                        let imgFile = path.join(imgPath, imgFileName);
+
+                        if (!fs.existsSync(imgPath)) {
+                            await fs.promises.mkdir(imgPath, { recursive: true });
+                        }
+
+                        // 检测图片文件是否存在
+                        const imgExts = ['.jpg', '.png', '.gif', '.webp'];
+                        for (let ext of imgExts) {
+                            if (fs.existsSync(imgFile + ext)) {
+                                // 图片已存在
+                                // 修改mtime，用于清理过期图片
+                                let currentDate = new Date();
+                                await fs.promises.utimes(imgFile + ext, currentDate, currentDate);
+                                chunk.data.url = 'file://' + imgFile + ext;
+                                return;
+                            }
+                        }
+
+                        // 下载图片
+                        let res = await got.get(chunk.data.url).buffer();
+
+                        let imageType = detectImageType(res);
+
+                        switch (imageType) {
+                            case 'image/jpeg':
+                                imgFile += '.jpg';
+                                break;
+                            case 'image/png':
+                                imgFile += '.png';
+                                break;
+                            case 'image/gif':
+                                imgFile += '.gif';
+                                break;
+                            case 'image/webp':
+                                imgFile += '.webp';
+                                break;
+                        }
+                        
+                        await fs.promises.writeFile(imgFile, res);
+
+                        chunk.data.url = 'file://' + imgFile;
+
+                        console.log('图片已下载：' + chunk.data.url);
+                    } catch (err: any) {
+                        this.app.logger.error(`下载图片失败：${chunk.data.url}`);
+                        console.error(err);
+                        if (err.name === 'HTTPError' && err.response) {
+                            console.error('Error Response: ', err.response?.body);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 
     async retrieveMediaUrl(mediaMessageChunk: MessageChunk): Promise<void> {
         if (!mediaMessageChunk.data.url) {
@@ -737,6 +821,48 @@ export default class QQRobot implements RobotAdapter {
                 item.reject(new Error('Socket Query Timeout'));
                 delete this.socketResponseQueue[key];
             }
+        }
+    }
+
+    async cleanImageCacheFromPath(basePath: string): Promise<number> {
+        // 清理图片缓存
+        const currentTime = Date.now();
+        const files = await fs.promises.readdir(basePath);
+
+        let count = 0;
+
+        for (let file of files) {
+            if (file.startsWith('.')) continue;
+
+            const filePath = path.join(basePath, file);
+            const stat = await fs.promises.stat(filePath);
+
+            if (stat.isDirectory()) {
+                count += await this.cleanImageCacheFromPath(filePath);
+            } else {
+                if (currentTime - stat.mtime.getTime() > this.IMG_CACHE_EXPIRE) {
+                    try {
+                        await fs.promises.unlink(filePath);
+                    } catch(err: any) {
+                        this.app.logger.error('清理QQ机器人图片缓存：无法删除文件，', err.message);
+                        console.error(err);
+                    }
+                    count ++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    async cleanImageCache() {
+        try {
+            this.app.logger.info('正在清理QQ机器人图片缓存');
+            let count = await this.cleanImageCacheFromPath(this.imgCachePath);
+            this.app.logger.info(`清理QQ机器人图片缓存：已清理 ${count} 个文件`);
+        } catch(err: any) {
+            this.app.logger.error('清理QQ机器人图片缓存失败', err.message);
+            console.error(err);
         }
     }
 }

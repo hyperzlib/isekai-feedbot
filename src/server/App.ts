@@ -215,7 +215,7 @@ export default class App {
                 throw new Error(`未知的路径类型: ${type}`);
         }
 
-        let fullPath = path.join(this.basePath, pathPrefix, ...paths);
+        let fullPath = path.join(pathPrefix, ...paths);
         if (!fs.existsSync(fullPath)) {
             await fs.promises.mkdir(fullPath, { recursive: true });
         }
