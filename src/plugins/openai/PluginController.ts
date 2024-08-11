@@ -595,12 +595,17 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
             let replyRes: ChatGPTApiResponse | undefined = undefined;
             if (isStream) {
                 // 处理流式输出
-                let onResultMessage = async (chunk: string) => {
+                let outputFinished = false;
+
+                let onResultMessage = async (chunk: string, bufferCount: number) => {
                     let msg = apiConf.st_convert ? await tw2s!.convertPromise(chunk) : chunk;
                     for (let [inputText, replacement] of Object.entries(this.config.output_replace)) {
                         content = content.replace(new RegExp(inputText, 'g'), replacement);
                     }
-                    await message.sendReply(msg, true);
+
+                    let shouldReply = outputFinished && bufferCount === 0;
+
+                    await message.sendReply(msg, shouldReply);
                 };
 
                 replyRes = await this.chatCompleteApi!.doApiRequest(reqMessageList, apiConf, {
@@ -608,6 +613,9 @@ export default class ChatGPTController extends PluginController<typeof defaultCo
                     receivedMessage: message,
                     llmFunctions,
                 });
+
+                outputFinished = true;
+
                 replyRes.outputMessage = apiConf.st_convert ? await tw2s!.convertPromise(replyRes.outputMessage) : replyRes.outputMessage;
                 if (this.app.debug) {
                     console.log(replyRes);

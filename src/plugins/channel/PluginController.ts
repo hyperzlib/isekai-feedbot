@@ -122,7 +122,12 @@ export default class ChannelFrameworkController extends PluginController<typeof 
             const channelTypeInfo = this.channelTypeList[channelType];
             if (channelTypeInfo) {
                 this.logger.info(`正在初始化推送频道：${channelPath}`);
-                await channelTypeInfo.initChannel?.(channelId);
+                try {
+                    await channelTypeInfo.initChannel?.(channelId);
+                } catch (err: any) {
+                    this.logger.error(`Failed to init channel ${channelPath}: ${err.message}`);
+                    console.error(err);
+                }
             }
         }
 
@@ -132,7 +137,12 @@ export default class ChannelFrameworkController extends PluginController<typeof 
             const channelTypeInfo = this.channelTypeList[channelType];
             if (channelTypeInfo) {
                 this.logger.info(`正在清理推送频道：${channelPath}`);
-                await channelTypeInfo.cleanupChannel?.(channelId);
+                try {
+                    await channelTypeInfo.cleanupChannel?.(channelId);
+                } catch (err: any) {
+                    this.logger.error(`Failed to cleanup channel ${channelPath}: ${err.message}`);
+                    console.error(err);
+                }
             }
         }
     }

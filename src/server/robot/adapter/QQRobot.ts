@@ -12,7 +12,7 @@ import { RobotConfig } from "../../types/config";
 import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
 import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
-import { asleep } from "#ibot/utils";
+import { asleep, messageChunksToXml } from "#ibot/utils";
 import { randomUUID } from "crypto";
 import path from "path";
 import { detectImageType } from "#ibot/utils/file";
@@ -360,19 +360,16 @@ export default class QQRobot implements RobotAdapter {
 
         message.type = 'attachment';
         message.content.push({
-            type: ['attachement', 'qqattachment'],
+            type: ['attachment', 'qqattachment'],
             data: {
-                sender_type: 'group',
-                sender_id: postData.group_id.toString(),
                 url: postData.file?.url ?? '',
                 fileName: postData.file?.name ?? '',
                 size: postData.file?.size,
                 file_id: postData.file?.id,
-                busid: postData.file?.busid,
             }
         } as QQAttachmentMessage);
 
-        let messageRef = await this.infoProvider.saveMessage(message);
+        let messageRef = this.infoProvider.saveMessage(message);
 
         let isResolved = false;
         // 处理原始消息

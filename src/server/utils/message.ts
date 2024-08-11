@@ -44,13 +44,13 @@ export function messageChunksToXml(chunks: MessageChunk[]): string {
                     let attrKey = camelCaseToHyphen(key);
                     switch (typeof value) { // 根据数据类型，在属性名前添加前缀
                         case 'boolean':
-                            elNode.setAttribute(`!${attrKey}`, value ? 'true' : 'false');
+                            elNode.setAttribute(`:${attrKey}`, value ? 'true' : 'false');
                             break;
                         case 'number':
-                            elNode.setAttribute(`#${attrKey}`, value.toString());
+                            elNode.setAttribute(`:${attrKey}`, value.toString());
                             break;
                         case 'object':
-                            elNode.setAttribute(`@${attrKey}`, JSON.stringify(value));
+                            elNode.setAttribute(`:${attrKey}`, JSON.stringify(value));
                             break;
                         default:
                             elNode.setAttribute(attrKey, value);
@@ -139,14 +139,15 @@ export function parseMessageChunksFromXml(xml: string, multiMessage: boolean = f
                 for (let attr of el.attributes) {
                     let key = hyphenToCamelCase(attr.name);
                     let value = attr.value;
-                    if (key.startsWith('!')) {
-                        data[key.slice(1)] = value === 'true';
-                    } else if (key.startsWith('#')) {
-                        data[key.slice(1)] = Number(value);
-                    } else if (key.startsWith('@')) {
-                        data[key.slice(1)] = JSON.parse(value);
-                    } else {
-                        data[key] = value;
+                    if (key.startsWith(':')) {
+                        // 特殊类型
+                        try {
+                            key = key.slice(1);
+                            value = eval('return ' + value);
+                            data[key] = value;
+                        } catch (e) {
+                            console.error('Failed to parse special type attribute:', e);
+                        }
                     }
                 }
 

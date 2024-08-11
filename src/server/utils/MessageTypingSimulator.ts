@@ -2,7 +2,7 @@ import EventEmitter from "events";
 import { asleep } from "./helpers";
 
 export class MessageTypingSimulator extends EventEmitter {
-    public chineseCPM = 1000;
+    public chineseCPM = 1500;
     public latinCPM = this.chineseCPM * 4;
     public randomDelay = [0, 3000];
 
@@ -41,11 +41,10 @@ export class MessageTypingSimulator extends EventEmitter {
                 }
 
                 const typingTime = this.getTypingTime(message);
-                // console.log('sleep time', typingTime);
                 await asleep(typingTime);
 
                 if (this.running) {
-                    this.emit('message', message, this.messageCount);
+                    this.emit('message', message, this.messageCount, this.messageBuffer.length);
                     this.messageCount++;
                 }
             }

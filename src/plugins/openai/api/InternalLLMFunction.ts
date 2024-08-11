@@ -48,12 +48,12 @@ export class InternalLLMFunction {
                     required: true,
                     schema: { "type": "string" },
                 },
-                {
-                    name: "question",
-                    description: "对图片提出的问题。",
-                    required: true,
-                    schema: { "type": "string" },
-                }
+                // {
+                //     name: "question",
+                //     description: "对图片提出的问题。",
+                //     required: true,
+                //     schema: { "type": "string" },
+                // }
             ],
             callback: this.recognizeImage.bind(this),
         })
@@ -73,11 +73,13 @@ export class InternalLLMFunction {
         return `${dateTimeString}`;
     }
 
-    private async searchOnWeb(params: any): Promise<string> {
+    private async searchOnWeb(params: any, message?: CommonReceivedMessage): Promise<string> {
         const MAX_RESULTS = 3;
         let keywords = params.keywords ?? '';
         const bingSearchConfig = this.mainController.config.bing_search;
         try {
+            await message?.sendReply('让我查查', true);
+
             let res = await got.get('https://api.bing.microsoft.com/v7.0/search', {
                 headers: {
                     "Ocp-Apim-Subscription-Key": bingSearchConfig.key,
@@ -131,13 +133,13 @@ export class InternalLLMFunction {
         }
     }
 
-    public async recognizeImage(params: any): Promise<string> {
+    public async recognizeImage(params: any, message?: CommonReceivedMessage): Promise<string> {
         if (!params.image_url) {
             return '请提供图片的URL地址。';
         }
 
         let imageUrl: string = params.image_url;
-        let question = params.question ?? '图片上有什么？';
+        let question = params.question ?? '详细描述图片上的内容，并提取图片上的文字。';
 
         let apiConf = this.mainController.getApiConfigById('image_recognition');
         if (!apiConf) {
@@ -145,6 +147,8 @@ export class InternalLLMFunction {
         }
 
         try {
+            await message?.sendReply('让我康康', true);
+
             if (imageUrl.startsWith('file://')) {
                 let imagePath = imageUrl.replace('file://', '');
                 let imageBuffer = await readFile(imagePath);

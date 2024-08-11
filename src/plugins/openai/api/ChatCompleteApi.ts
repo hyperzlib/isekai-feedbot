@@ -25,7 +25,7 @@ export type ChatGPTApiResponse = {
 export type RequestChatCompleteOptions = {
     receivedMessage?: CommonReceivedMessage
     llmFunctions?: LLMFunctionContainer,
-    onMessage?: (chunk: string) => any,
+    onMessage?: (chunk: string, bufferSize: number) => any,
 };
 
 export const defaultRequestChatCompleteOptions = {
@@ -140,8 +140,8 @@ export class ChatCompleteApi {
 
         let messageTyping = new MessageTypingSimulator();
 
-        messageTyping.on('message', (message: string) => {
-            options.onMessage?.(message);
+        messageTyping.on('message', (message: string, _, bufferSize: number) => {
+            options.onMessage?.(message, bufferSize);
         });
 
         const flush = (force = false) => {
@@ -341,7 +341,7 @@ export class ChatCompleteApi {
 
                 if (firstChoice.finish_reason === 'function_call') {
                     if (firstChoice.message?.content) { // 输出调用前的提示
-                        options.onMessage?.(firstChoice.message.content);
+                        options.onMessage?.(firstChoice.message.content, 1);
                     }
                     
                     if (firstChoice.message?.function_call) {
@@ -375,7 +375,7 @@ export class ChatCompleteApi {
                     let completion_tokens = res.usage?.completion_tokens ?? 0;
 
                     if (firstChoice.message?.content) { // 输出调用前的提示
-                        options.onMessage?.(firstChoice.message.content);
+                        options.onMessage?.(firstChoice.message.content, 1);
                     }
 
                     if (firstChoice.message?.tool_calls) {
@@ -421,27 +421,24 @@ export class ChatCompleteApi {
 
                     if (options.onMessage) {
                         // 模拟流式输出
+                        let messageTyping = new MessageTypingSimulator();
+
+                        messageTyping.on('message', (message: string, _, bufferSize: number) => {
+                            options.onMessage?.(message, bufferSize);
+                        });
+
                         let buffer = '';
-
-                        function flush() {
-                            buffer = buffer.replace(/(^\n+|\n+$)/g, '');
-                            if (buffer.length > 0) {
-                                options.onMessage!(buffer);
-                            }
-                        }
-
                         for (const line of completions.split('\n\n')) {
                             buffer += line + '\n';
                             if (buffer.length > 100) {
-                                flush();
-
-                                await asleep(randomInt(1500, 2500));
-
+                                messageTyping.pushMessage(buffer);
                                 buffer = '';
                             }
                         }
 
-                        flush();
+                        if (buffer.trimEnd().length > 0) {
+                            messageTyping.pushMessage(buffer);
+                        }
                     }
 
                     messageList = [

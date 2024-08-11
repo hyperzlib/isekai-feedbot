@@ -3,34 +3,11 @@ import { CommonReceivedMessage, CommonSendMessage, ImageMessage } from "#ibot/me
 import got, { OptionsOfTextResponseBody } from "got/dist/source";
 import ChatGPTController from "../openai/PluginController";
 import { UserRequestError } from "#ibot-api/error/errors";
-import { FetchFn, Midjourney, MJBot, MJConfigParam, MJMessage, NijiBot } from "midjourney";
-import { HttpsProxyAgent } from "hpagent";
-import WebSocket from "isomorphic-ws";
-import { asleep, withTimeout } from "#ibot/utils";
+import { FetchFn, Midjourney, MidjourneyApi, MJBot, MJConfigParam, MJMessage, NijiBot } from "midjourney";
+import { asleep, chatIdentityToString, withTimeout } from "#ibot/utils";
 import { CommandInputArgs } from "#ibot/PluginManager";
-
-export type ImagineTaskInfo = {
-    message: CommonReceivedMessage,
-    prompt: string,
-    noErrorReply: boolean,
-    isRaw?: boolean,
-    subjectType?: string,
-    paintSize?: string,
-    resolve: () => void,
-    reject: (reason: any) => void,
-};
-
-export type UpscaleTaskInfo = {
-    message: CommonReceivedMessage,
-    pickIndex: number,
-    apiId: string,
-    msgId: string,
-    hash: string,
-    flags: number,
-    noErrorReply: boolean,
-    resolve: () => void,
-    reject: (reason: any) => void,
-};
+import { MidjourneyApiController, MJModel } from "./api/MidjourneyApiController";
+import { BaseSender, ChatIdentity } from "#ibot/message/Sender";
 
 export type ApiConfig = {
     id: string,
@@ -55,6 +32,7 @@ export type SizeConfig = {
 
 export type Text2ImgRuntimeOptions = {
     useTranslate?: boolean,
+    model?: MJModel,
     noErrorReply?: boolean,
 };
 
@@ -67,43 +45,6 @@ const LLM_PROMPT: string = "Please generate the Midjourney prompt according to t
     '请根据以下要求生成：\n' +
     '{{{prompt}}}';
 
-const createProxyFetch = (proxyUrl: string): FetchFn => {
-    return async (input, init): Promise<Response> => {
-        const agent = new HttpsProxyAgent({
-            keepAlive: true,
-            keepAliveMsecs: 1000,
-            maxSockets: 256,
-            maxFreeSockets: 256,
-            scheduling: "lifo",
-            proxy: proxyUrl,
-        });
-        if (!init) init = {};
-        // @ts-ignore
-        init.agent = agent;
-        // @ts-ignore
-        return fetch(input, init);
-    }
-}
-
-const createProxyWebSocket = (proxyUrl: string): any => {
-    return class WebSocketProxy extends WebSocket {
-        constructor(address: any, options: any) {
-            const agent = new HttpsProxyAgent({
-                keepAlive: true,
-                keepAliveMsecs: 1000,
-                maxSockets: 256,
-                maxFreeSockets: 256,
-                scheduling: "lifo",
-                proxy: proxyUrl,
-            });
-
-            if (!options) options = {};
-            options.agent = agent;
-            super(address, options);
-        }
-    }
-}
-
 const defaultConfig = {
     api: [] as ApiConfig[],
     size: [] as SizeConfig[],
@@ -115,20 +56,18 @@ const defaultConfig = {
         key: ""
     },
     prompt_gen_llm_id: undefined as string | undefined,
+    sponsored_users: [] as string[],
 }
 
 export default class MidjourneyController extends PluginController<typeof defaultConfig> {
     private SESSION_KEY_GENERATE_COUNT = 'midjourney_generateCount';
 
     public chatGPTClient: any;
+    private mjApi!: MidjourneyApiController;
 
     private mainApi!: ApiConfig;
     private defaultSize!: SizeConfig;
 
-    private clients: Record<string, Midjourney> = {};
-
-    private imagineQueue: ImagineTaskInfo[] = [];
-    private upscaleQueue: UpscaleTaskInfo[] = [];
     private running = true;
 
     private apiMatcher: RegExp[][] = [];
@@ -140,6 +79,8 @@ export default class MidjourneyController extends PluginController<typeof defaul
     }
 
     async initialize(config: any) {
+        this.mjApi = new MidjourneyApiController(this.app, this);
+
         this.event.registerCommand({
             command: 'midjourney',
             name: '使用Midjourney生成绘画',
@@ -149,6 +90,19 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
             return this.text2img(args.param, message, {
                 useTranslate: true
+            });
+        });
+
+        this.event.registerCommand({
+            command: 'niji',
+            name: '使用Nji生成绘画',
+            alias: ['nj']
+        }, (args, message, resolve) => {
+            resolve();
+
+            return this.text2img(args.param, message, {
+                useTranslate: true,
+                model: MJModel.Niji
             });
         });
 
@@ -170,13 +124,24 @@ export default class MidjourneyController extends PluginController<typeof defaul
             return this.upscaleImage(args, message, repliedMessage as CommonSendMessage);
         });
 
-        const runQueue = async () => {
-            while(this.running) {
-                await this.runQueue();
-                await asleep(100);
+        this.event.registerCommand({
+            command: '以图生图',
+            name: '以Midjourney生成的图片中的一张为基础，生成新的图片。',
+            alias: ['variant', '图生图']
+        }, async (args, message, resolve) => {
+            if (!message.repliedId) {
+                return;
             }
-        }
-        runQueue().catch((e) => console.error(e));
+
+            const repliedMessage = await message.getRepliedMessage();
+            if (!repliedMessage?.extra.isMidjourneyResult && repliedMessage?.extra.mjType !== 'imagine') {
+                return;
+            }
+
+            resolve();
+
+            return this.variantImage(args, message, repliedMessage as CommonSendMessage);
+        });
     }
 
     async destroy() {
@@ -226,46 +191,6 @@ export default class MidjourneyController extends PluginController<typeof defaul
         });
     }
 
-    private async getClient(apiConfig: ApiConfig) {
-        const token = apiConfig.salai_token;
-        if (!this.clients[token]) {
-            let botId: any = MJBot;
-            // switch (apiConfig.bot_id) {
-            //     case 'mj':
-            //     case 'midjourney':
-            //         botId = MJBot;
-            //         break;
-            //     case 'nj':
-            //     case 'niji':
-            //         botId = NijiBot;
-            //         break;
-            // }
-
-            let options: MJConfigParam = {
-                SalaiToken: apiConfig.salai_token,
-                BotId: botId,
-                ServerId: apiConfig.server_id,
-                ChannelId: apiConfig.channel_id,
-                Ws: true,
-                // Debug: this.app.debug,
-            };
-
-            if (apiConfig.proxy) {
-                options.fetch = createProxyFetch(apiConfig.proxy);
-                options.WebSocket = createProxyWebSocket(apiConfig.proxy);
-            }
-
-            const client = new Midjourney(options);
-
-            this.clients[token] = client;
-        }
-
-        const client = this.clients[token];
-        await client.Connect();
-
-        return client;
-    }
-
     private async llmGenerateImage(params: any, message?: CommonReceivedMessage): Promise<string> {
         if (message) {
             const userRules = await this.app.role.getUserRules(message.sender);
@@ -308,21 +233,45 @@ export default class MidjourneyController extends PluginController<typeof defaul
         }
     }
 
-    public async text2img(prompt: string, message: CommonReceivedMessage, options: Text2ImgRuntimeOptions = {}) {
-        try {
-            const userSessionStore = message.session.user;
+    public async checkSponsoredAndRateLimit(message: CommonReceivedMessage) {
+        const chatIdentity = (message.sender as BaseSender).identity;
 
+        let userIdentityStr = chatIdentityToString({
+            type:'private',
+            robot: chatIdentity.robot,
+            userId: chatIdentity.userId,
+            userRoles: chatIdentity.userRoles,
+        });
+
+        let isSponsored = false;
+        if (this.config.sponsored_users.includes(userIdentityStr)) {
+            isSponsored = true;
+        }
+
+        if (!isSponsored) {
             // 使用频率限制
+            const userSessionStore = message.session.user;
             let rateLimitExpires = await userSessionStore.getRateLimit(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit, this.config.rate_limit_minutes * 60);
             if (rateLimitExpires) {
                 let minutesLeft = Math.ceil(rateLimitExpires / 60);
                 throw new UserRequestError(`才刚画过呢，${minutesLeft}分钟后再来吧。`);
             }
-            await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
 
-            if (this.imagineQueue.length >= this.config.queue_max_size) {
+            if (this.mjApi.isRelaxQueueBusy) {
                 throw new UserRequestError('太多人在画了，等一下再来吧。');
             }
+        } else {
+            if (this.mjApi.isFastQueueBusy) {
+                throw new UserRequestError('太多人在画了，等一下再来吧。');
+            }
+        }
+
+        return isSponsored;
+    }
+
+    public async text2img(prompt: string, message: CommonReceivedMessage, options: Text2ImgRuntimeOptions = {}) {
+        try {
+            let isSponsored = await this.checkSponsoredAndRateLimit(message);
 
             prompt = prompt.trim();
             this.logger.debug("收到绘图请求: " + prompt);
@@ -394,17 +343,21 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 }
             }
 
-            const promise = new Promise<void>((resolve, reject) => {
-                this.imagineQueue.push({
-                    message,
-                    prompt,
-                    noErrorReply: !!options.noErrorReply,
-                    subjectType,
-                    paintSize,
-                    isRaw,
-                    resolve,
-                    reject,
-                });
+            let mjModel = options.model ?? MJModel.MJ;
+
+            // 增加请求计数
+            const userSessionStore = message.session.user;
+            await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
+
+            const promise = this.mjApi.imagine({
+                message,
+                prompt,
+                noErrorReply: !!options.noErrorReply,
+                subjectType,
+                paintSize,
+                isRaw,
+                model: mjModel,
+                relax: !isSponsored,
             });
 
             return {
@@ -474,18 +427,65 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 await message.sendReply('请在1-4之间选择一个图片序号。', true);
             }
 
-            const promise = new Promise<void>((resolve, reject) => {
-                this.upscaleQueue.push({
-                    message,
-                    pickIndex,
-                    apiId: repliedMessage.extra.mjApi,
-                    msgId: repliedMessage.extra.mjMsgId,
-                    hash: repliedMessage.extra.mjHash,
-                    flags: repliedMessage.extra.mjFlags,
-                    noErrorReply: false,
-                    resolve,
-                    reject,
-                });
+            const promise = this.mjApi.upscaleImage({
+                message,
+                pickIndex,
+                apiId: repliedMessage.extra.mjApi,
+                msgId: repliedMessage.extra.mjMsgId,
+                hash: repliedMessage.extra.mjHash,
+                flags: repliedMessage.extra.mjFlags,
+                noErrorReply: false,
+            });
+
+            return {
+                promise,
+            };
+        } catch (err: any) {
+            if (err instanceof UserRequestError) {
+                await message.sendReply(err.message, true);
+                return;
+            }
+
+            this.logger.error("Upscale图片失败", err);
+            console.error(err);
+
+            if (err.name === 'HTTPError' && err.response) {
+                switch (err.response.statusCode) {
+                    case 429:
+                        await message.sendReply('太频繁了，过会儿再试试呗。', true);
+                        return;
+                }
+            } else if (err.name === 'RequestError') {
+                await message.sendReply(`连接失败: ${err.message}，过会儿再试试呗。`, true);
+                return;
+            }
+
+            await message.sendReply(`Upscale图片失败: ${err.message}`, true);
+        }
+    }
+
+    public async variantImage(args: CommandInputArgs, message: CommonReceivedMessage, repliedMessage: CommonSendMessage) {
+        try {
+            let pickIndex = parseInt(args.param);
+            if (isNaN(pickIndex) && pickIndex < 0 && pickIndex > 4) {
+                await message.sendReply('请在1-4之间选择一个图片序号。', true);
+            }
+
+            let isSponsored = await this.checkSponsoredAndRateLimit(message);
+
+            // 增加请求计数
+            const userSessionStore = message.session.user;
+            await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
+
+            const promise = this.mjApi.variantImage({
+                message,
+                pickIndex,
+                apiId: repliedMessage.extra.mjApi,
+                msgId: repliedMessage.extra.mjMsgId,
+                hash: repliedMessage.extra.mjHash,
+                flags: repliedMessage.extra.mjFlags,
+                relax: !isSponsored,
+                noErrorReply: false,
             });
 
             return {
@@ -593,247 +593,6 @@ export default class MidjourneyController extends PluginController<typeof defaul
             return this.config.size[mostMatchedSizeIndex];
         } else {
             return this.defaultSize;
-        }
-    }
-
-    private async loadImageFromUrl(url: string, proxy?: string) {
-        let options: OptionsOfTextResponseBody = {};
-        if (proxy) {
-            options.headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-            };
-            
-            options.agent = {
-                https: new HttpsProxyAgent({
-                    keepAlive: true,
-                    keepAliveMsecs: 1000,
-                    maxSockets: 256,
-                    maxFreeSockets: 256,
-                    scheduling: "lifo",
-                    proxy: proxy,
-                }),
-            }
-        }
-
-        let resImage = await got(url, options).buffer();
-        
-        return resImage;
-    }
-
-    private async compressThumb(image: Buffer, maxSize: number = 1920) {
-        try {
-            const sharp = await import('sharp');
-            let imgObj = sharp.default(image);
-
-            let metadata = await imgObj.metadata();
-            let imgWidth = metadata.width ?? 2048;
-            let imgHeight = metadata.height ?? 2048;
-
-            let targetWidth = 0;
-            let targetHeight = 0;
-
-            if (imgWidth > imgHeight) {
-                targetWidth = Math.min(imgWidth, maxSize);
-                targetHeight = Math.round(targetWidth * imgHeight / imgWidth);
-            } else {
-                targetHeight = Math.min(imgHeight, maxSize);
-                targetWidth = Math.round(targetHeight * imgWidth / imgHeight);
-            }
-
-            const thumb = await imgObj.resize(targetWidth, targetHeight).jpeg({ quality: 80 }).toBuffer();
-
-            return thumb;
-        } catch(err: any) {
-            if (err.code === 'MODULE_NOT_FOUND') {
-                this.logger.warn("未安装sharp模块，跳过压缩图片。");
-                return image;
-            }
-
-            throw err;
-        }
-    }
-
-    public async runQueue() {
-        if (!this.running) {
-            return;
-        }
-        if (this.imagineQueue.length === 0 && this.upscaleQueue.length === 0) {
-            return;
-        }
-
-        let client: Midjourney | null = null;
-
-        if (this.upscaleQueue.length > 0) {
-            // 优先处理放大请求
-            const currentTask = this.upscaleQueue.shift()!;
-
-            this.logger.debug("开始放大图片: " + currentTask.msgId);
-
-            let api = this.config.api.find(api => api.id === currentTask.apiId);
-            if (!api) {
-                await currentTask.message.sendReply('放大图片失败：未找到API', true);
-                return;
-            }
-
-            try {
-                client = await this.getClient(api);
-
-                let upscaleRes: MJMessage | null = null;
-
-                try {
-                    upscaleRes = await withTimeout(1 * 60 * 1000, client!.Upscale({
-                        index: currentTask.pickIndex as any,
-                        msgId: currentTask.msgId,
-                        hash: currentTask.hash,
-                        flags: currentTask.flags,
-                    }));
-                    upscaleRes = upscaleRes ?? null;
-                } catch (err: any) {
-                    if (err.name === 'TimeoutError') {
-                        await currentTask.message.sendReply('放大图片超时', true);
-                        client.Close();
-                        return;
-                    } else {
-                        throw err;
-                    }
-                }
-
-                if (!upscaleRes) {
-                    await currentTask.message.sendReply('放大图片失败：Upscale对象为空', true);
-                    return;
-                }
-
-                let imageUrl = upscaleRes.proxy_url ?? upscaleRes.uri;
-                let image = await this.loadImageFromUrl(imageUrl, api.proxy);
-
-                image = await this.compressThumb(image, 3840);
-
-                await currentTask.message.sendReply([
-                    {
-                        type: ['image'],
-                        text: '[图片]',
-                        data: {
-                            url: "base64://" + image.toString('base64'),
-                        }
-                    } as ImageMessage
-                ], false, {
-                    isMidjourneyResult: true,
-                    mjType: 'upscale',
-                    mjApi: api.id,
-                    mjMsgId: upscaleRes.id,
-                    mjHash: upscaleRes.hash,
-                    mjFlags: upscaleRes.flags,
-                });
-
-                currentTask.resolve();
-            } catch(e: any) {
-                if (e instanceof UserRequestError) {
-                    await currentTask.message.sendReply(e.message, true);
-                } else {
-                    this.logger.error("放大图片失败：" + e.message);
-                    console.error(e);
-                    await currentTask.message.sendReply('放大图片失败：' + e.message, true);
-                }
-            } finally {
-                if (this.upscaleQueue.length === 0 && this.imagineQueue.length === 0) {
-                    // Close the connection if no more tasks
-                    client?.Close();
-                }
-            }
-        } else {
-            // Start generating
-            const currentTask = this.imagineQueue.shift()!;
-
-            this.logger.debug("开始生成图片: " + currentTask.prompt);
-
-            let api = this.getMostMatchedApi(currentTask.prompt, currentTask.subjectType);
-            this.logger.debug("使用API: " + api.id);
-
-            let prompt = currentTask.prompt;
-
-            if (!currentTask.isRaw) {
-                // 自动选择尺寸
-                let size = this.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
-                this.logger.debug("使用尺寸: " + size.ratio);
-                prompt += ` --ar ${size.ratio}`;
-            }
-
-            try {
-                client = await this.getClient(api);
-
-                let imagineRes: MJMessage | null = null;
-                let noticeSent = false;
-
-                // 2分钟后自动关闭连接
-                try {
-                    imagineRes = await withTimeout(4 * 60 * 1000, client.Imagine(
-                        prompt,
-                        (uri: string, progress: string) => {
-                            if (!noticeSent) {
-                                currentTask.message.sendReply('正在生成图片，请稍等。', true).catch(console.error);
-                                noticeSent = true;
-                            }
-                        }
-                    ));
-                } catch (err: any) {
-                    if (err.name === 'TimeoutError') {
-                        await currentTask.message.sendReply('生成图片超时', true);
-                        client.Close();
-                        return;
-                    }
-
-                    throw err;
-                }
-
-                if (!imagineRes) {
-                    await currentTask.message.sendReply('生成图片失败：Imagine对象为空', true);
-                    return;
-                }
-
-                let imageUrl = imagineRes.proxy_url ?? imagineRes.uri;
-                let image = await this.loadImageFromUrl(imageUrl, api.proxy);
-
-                image = await this.compressThumb(image);
-
-                await currentTask.message.sendReply([
-                    {
-                        type: ['image'],
-                        text: '[图片]',
-                        data: {
-                            url: "base64://" + image.toString('base64'),
-                        }
-                    } as ImageMessage
-                ], false, {
-                    isMidjourneyResult: true,
-                    prompt: currentTask.prompt,
-                    mjType: 'imagine',
-                    mjApi: api.id,
-                    mjMsgId: imagineRes.id,
-                    mjHash: imagineRes.hash,
-                    mjFlags: imagineRes.flags,
-                });
-
-                currentTask.resolve();
-            } catch(e: any) {
-                if (e instanceof UserRequestError) {
-                    if (!currentTask.noErrorReply) {
-                        await currentTask.message.sendReply(e.message, true);
-                    }
-                    // currentTask.reject(e.message);
-                } else {
-                    this.logger.error("生成图片失败：" + e.message);
-                    console.error(e);
-                    if (!currentTask.noErrorReply) {
-                        await currentTask.message.sendReply('生成图片失败：' + e.message, true);
-                    }
-                    // currentTask.reject(e.message);
-                }
-            } finally {
-                if (this.upscaleQueue.length === 0 && this.imagineQueue.length === 0) {
-                    // Close the connection if no more tasks
-                    client?.Close();
-                }
-            }
         }
     }
 }

@@ -56,15 +56,12 @@ export interface QQUrlMessage extends TextMessage {
 }
 
 export interface QQAttachmentMessage extends AttachmentMessage {
-    type: ['attachement', 'qqattachment'];
+    type: ['attachment', 'qqattachment'];
     data: {
-        sender_type: string;
-        sender_id: string;
         url: string;
         fileName: string;
         size?: number;
         file_id?: string;
-        busid?: number;
     }
 }
 
@@ -149,6 +146,17 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                         }
                     } as QQVideoMessage);
                     break;
+                case 'file':
+                    message.content.push({
+                        type: ['attachment', 'qqattachment'],
+                        text: '[文件]',
+                        data: {
+                            url: chunkData.data?.url ?? '',
+                            fileName: chunkData.data?.name ?? '',
+                            size: chunkData.data?.size ?? 0,
+                            file_id: chunkData.data?.id,
+                        }
+                    } as QQAttachmentMessage);
                 case 'face':
                     if (chunkData.data?.id) {
                         let emojiChar = qqFaceToEmoji(parseInt(chunkData.data.id));

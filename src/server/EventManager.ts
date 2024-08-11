@@ -7,7 +7,7 @@ import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, Message
 import { Robot } from "./robot/Robot";
 import { SubscribeItem, SubscribeTargetInfo } from "./SubscribeManager";
 import { Reactive } from "./utils/reactive";
-import { chatIdentityToString } from "./utils";
+import { chatIdentityToString, messageChunksToXml } from "./utils";
 
 export type ControllerEventInfo = {
     priority: number;
@@ -152,7 +152,7 @@ export class EventManager {
     public async emit(eventName: string, meta: EventMeta, ...args: any[]) {
         if (this.app.debug) {
             if (typeof args[0] === 'object' && args[0].chatType) {
-                this.app.logger.debug(`触发事件 ${eventName} ${args[0].contentText}`);
+                this.app.logger.debug(`触发事件 ${eventName} ${messageChunksToXml(args[0].content)}`);
             } else {
                 this.app.logger.debug(`触发事件 ${eventName}`);
             }
