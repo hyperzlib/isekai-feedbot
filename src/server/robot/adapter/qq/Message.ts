@@ -306,7 +306,7 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
 export async function convertMessageToQQChunk(message: CommonSendMessage) {
     let msgChunk: any[] = [];
 
-    message.content.forEach((rawChunk) => {
+    for (let rawChunk of message.content) {
         let chunk = rawChunk;
 
         if (chunk.type.includes('text')) {
@@ -322,14 +322,20 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
                 data: { id: chunk.data.id }
             });
         } else if (chunk.type.includes('image')) {
-            if (chunk.data.url.startsWith('asset://')) {
-                // TODO: 将图片转换为base64
+            let url = chunk.data.url;
+
+            if (chunk.data.blob) { // 将Blob转换为base64
+                console.log('convert blob to base64');
+                const imageBlob = chunk.data.blob as Blob;
+                const imageBuffer = Buffer.from(await imageBlob.arrayBuffer());
+                url = 'base64://' + imageBuffer.toString('base64');
+                delete chunk.data.blob;
             }
 
             msgChunk.push({
                 type: 'image',
                 data: {
-                    file: chunk.data.url,
+                    file: url,
                     subType: chunk.data.subType ?? 0
                 }
             });
@@ -364,7 +370,7 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
                 }
             });
         }
-    });
+    }
 
     if (message.repliedId) {
         if (message.chatType === 'group' && message.repliedMessage?.sender.userId) {

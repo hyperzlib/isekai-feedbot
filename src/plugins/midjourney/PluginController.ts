@@ -8,6 +8,9 @@ import { asleep, chatIdentityToString, withTimeout } from "#ibot/utils";
 import { CommandInputArgs } from "#ibot/PluginManager";
 import { MidjourneyApiController, MJModel } from "./api/MidjourneyApiController";
 import { BaseSender, ChatIdentity } from "#ibot/message/Sender";
+import { readFile } from "fs/promises";
+import { detectImageType, loadMessageImage } from "#ibot/utils/file";
+import PublicAssetsController from "../public-assets/PluginController";
 
 export type ApiConfig = {
     id: string,
@@ -88,7 +91,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
         }, (args, message, resolve) => {
             resolve();
 
-            return this.text2img(args.param, message, {
+            return this.text2img(args, message, {
                 useTranslate: true
             });
         });
@@ -100,7 +103,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
         }, (args, message, resolve) => {
             resolve();
 
-            return this.text2img(args.param, message, {
+            return this.text2img(args, message, {
                 useTranslate: true,
                 model: MJModel.Niji
             });
@@ -269,12 +272,60 @@ export default class MidjourneyController extends PluginController<typeof defaul
         return isSponsored;
     }
 
-    public async text2img(prompt: string, message: CommonReceivedMessage, options: Text2ImgRuntimeOptions = {}) {
+    public async text2img(input: string | CommandInputArgs, message: CommonReceivedMessage, options: Text2ImgRuntimeOptions = {}) {
         try {
             let isSponsored = await this.checkSponsoredAndRateLimit(message);
 
+            let prompt = '';
+            let refImage: string | undefined = undefined;
+
+            if (typeof input === 'string') {
+                prompt = input;
+            } else { // 解析message
+                if (message.repliedId) {
+                    // 获取回复的消息
+                    let repliedMessage = await message.getRepliedMessage();
+
+                    for (const chunk of repliedMessage?.content ?? []) {
+                        if (chunk.type.includes('image') && chunk.data.url) {
+                            refImage = chunk.data.url;
+                        }
+                    }
+                }
+
+                for (const [i, chunk] of message.content.entries()) {
+                    if (chunk.type.includes('text') && chunk.text) {
+                        if (i === 0) { // 去除命令
+                            prompt = chunk.text.substring(input.command.length) ?? '';
+                        } else {
+                            prompt += chunk.text;
+                        }
+                    } else if (chunk.type.includes('image')) {
+                        refImage = chunk.data.url;
+                    }
+                }
+            }
+
+            if (refImage && !refImage.startsWith('http')) {
+                let imageData = await loadMessageImage(refImage);
+                if (!imageData) {
+                    throw new UserRequestError('无法加载参考图片。');
+                }
+
+                const assets = this.app.getPlugin<PublicAssetsController>('public_assets');
+                if (!assets) {
+                    throw new UserRequestError('无法上传图片，需要安装PublicAssets插件。');
+                }
+
+                let imageAsset = await assets.createAsset(imageData.content, { mimeType: imageData.type });
+                refImage = imageAsset.url;
+            }
+
             prompt = prompt.trim();
             this.logger.debug("收到绘图请求: " + prompt);
+            if (refImage) {
+                this.logger.debug("参考图片: " + refImage);
+            }
 
             let paintSize: string | undefined;
             let subjectType: string | undefined;
@@ -358,6 +409,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 isRaw,
                 model: mjModel,
                 relax: !isSponsored,
+                refUrl: refImage,
             });
 
             return {

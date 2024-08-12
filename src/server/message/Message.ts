@@ -29,6 +29,7 @@ export interface ImageMessage extends MessageChunk {
     data: {
         url: string;
         alt?: string;
+        blob?: Blob;
     };
 }
 

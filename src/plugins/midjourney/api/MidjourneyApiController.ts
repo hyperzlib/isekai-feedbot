@@ -7,6 +7,7 @@ import WebSocket from "isomorphic-ws";
 import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
 import got, { OptionsOfTextResponseBody } from "got";
 import { UserRequestError } from "#ibot-api/error/errors";
+import { detectImageType } from "#ibot/utils/file";
 
 export enum MJModel {
     MJ = 'mj',
@@ -26,6 +27,7 @@ export type ImagineTaskInfo = {
     isRaw?: boolean,
     subjectType?: string,
     paintSize?: string,
+    refUrl?: string,
     model: MJModel,
     relax: boolean,
 };
@@ -355,6 +357,10 @@ export class MidjourneyApiController {
 
         prompt += ' ' + params.join(' ');
 
+        if (currentTask.refUrl) {
+            prompt = currentTask.refUrl + ' ' + prompt;
+        }
+
         try {
             client = await this.getClient(api);
 
@@ -366,7 +372,9 @@ export class MidjourneyApiController {
             try {
                 currentTask.message.sendReply('安排了', true);
 
-                imagineRes = await withTimeout(6 * 60 * 1000, client.Imagine(
+                let timeoutMinutes = currentTask.relax ? 12 : 6; // Relax任务12分钟，Fast任务5分钟
+
+                imagineRes = await withTimeout(timeoutMinutes * 60 * 1000, client.Imagine(
                     prompt,
                     (uri: string, progress: string) => {
                         if (!noticeSent) {
@@ -399,13 +407,15 @@ export class MidjourneyApiController {
             let image = await this.loadImageFromUrl(imageUrl, api.proxy);
 
             image = await this.compressThumb(image);
+            let imgType = detectImageType(image);
 
             await currentTask.message.sendReply([
                 {
                     type: ['image'],
                     text: '[图片]',
                     data: {
-                        url: "base64://" + image.toString('base64'),
+                        url: 'blob:',
+                        blob: new Blob([image], { type: imgType }),
                     }
                 } as ImageMessage
             ], false, {
@@ -487,13 +497,15 @@ export class MidjourneyApiController {
             let image = await this.loadImageFromUrl(imageUrl, api.proxy);
 
             image = await this.compressThumb(image, 3840);
+            let imgType = detectImageType(image);
 
             await currentTask.message.sendReply([
                 {
                     type: ['image'],
                     text: '[图片]',
                     data: {
-                        url: "base64://" + image.toString('base64'),
+                        url: 'blob:',
+                        blob: new Blob([image], { type: imgType }),
                     }
                 } as ImageMessage
             ], false, {
@@ -540,7 +552,9 @@ export class MidjourneyApiController {
 
                 let noticeSent = false;
 
-                res = await withTimeout(1 * 60 * 1000, client!.Variation({
+                let timeoutMinutes = currentTask.relax ? 12 : 6; // Relax任务12分钟，Fast任务5分钟
+
+                res = await withTimeout(timeoutMinutes * 60 * 1000, client!.Variation({
                     index: currentTask.pickIndex as any,
                     msgId: currentTask.msgId,
                     hash: currentTask.hash,
@@ -578,13 +592,15 @@ export class MidjourneyApiController {
             let image = await this.loadImageFromUrl(imageUrl, api.proxy);
 
             image = await this.compressThumb(image, 3840);
+            let imgType = detectImageType(image);
 
             await currentTask.message.sendReply([
                 {
                     type: ['image'],
                     text: '[图片]',
                     data: {
-                        url: "base64://" + image.toString('base64'),
+                        url: 'blob:',
+                        blob: new Blob([image], { type: imgType }),
                     }
                 } as ImageMessage
             ], false, {

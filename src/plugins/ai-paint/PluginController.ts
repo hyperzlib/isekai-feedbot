@@ -574,13 +574,16 @@ export default class StableDiffusionController extends PluginController<typeof d
                         return;
                     }
                 }
+
+                let imageBuffer = Buffer.from(image, 'base64');
                 
                 await currentTask.message.sendReply([
                     {
                         type: ['image'],
                         text: '[图片]',
                         data: {
-                            url: "base64://" + image,
+                            url: 'blob:',
+                            blob: new Blob([imageBuffer], { type: 'image/png' }),
                         }
                     } as ImageMessage
                 ], false, {

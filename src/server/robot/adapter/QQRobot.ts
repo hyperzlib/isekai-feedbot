@@ -7,7 +7,7 @@ import App from "../../App";
 import { Robot, RobotAdapter } from "../Robot";
 import { FullRestfulContext, RestfulRouter, RestfulWsRouter } from "../../RestfulApiManager";
 import { convertMessageToQQChunk, parseQQMessageChunk, QQAttachmentMessage, QQGroupMessage, QQGroupSender, QQPrivateMessage, QQUserSender } from "./qq/Message";
-import { CommonReceivedMessage, CommonSendMessage, MessageChunk } from "../../message/Message";
+import { CommonReceivedMessage, CommonSendMessage, ImageMessage, MessageChunk } from "../../message/Message";
 import { RobotConfig } from "../../types/config";
 import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
@@ -616,9 +616,43 @@ export default class QQRobot implements RobotAdapter {
             }
             
             // 保存消息
+            message = await this.beforeSaveSentMessage(message);
             this.infoProvider.saveMessage(message);
         } catch(err: any) {
             console.error(err);
+        }
+
+        return message;
+    }
+
+    async beforeSaveSentMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
+        // 将base64图片转换为文件路径
+        for (let chunk of message.content) {
+            if (chunk.type.includes('image') && (chunk.data.url?.startsWith('base64://') || chunk.data.blob)) {
+                let imgData: Buffer;
+                if (chunk.data.blob) {
+                    const imgBlob = chunk.data.blob as Blob;
+                    imgData = Buffer.from(await imgBlob.arrayBuffer());
+                } else {
+                    imgData = Buffer.from(chunk.data.url.substring(9), 'base64');
+                }
+
+                let imgFileName = randomUUID();
+
+                let imgPath = path.join(this.imgCachePath, imgFileName[0], imgFileName.substring(0, 2));
+                let imgFile = path.join(imgPath, imgFileName);
+
+                if (!fs.existsSync(imgPath)) {
+                    await fs.promises.mkdir(imgPath, { recursive: true });
+                }
+
+                let imgExt = detectImageType(imgData) ?? 'png';
+
+                await fs.promises.writeFile(imgFile + '.' + imgExt, imgData);
+                this.app.logger.debug(`发送的图片已保存：${imgFile}.${imgExt}`);
+
+                chunk.data.url = 'file://' + imgFile + '.' + imgExt;
+            }
         }
 
         return message;
