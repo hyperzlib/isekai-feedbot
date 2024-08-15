@@ -325,7 +325,6 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
             let url = chunk.data.url;
 
             if (chunk.data.blob) { // 将Blob转换为base64
-                console.log('convert blob to base64');
                 const imageBlob = chunk.data.blob as Blob;
                 const imageBuffer = Buffer.from(await imageBlob.arrayBuffer());
                 url = 'base64://' + imageBuffer.toString('base64');
@@ -374,28 +373,27 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
 
     if (message.repliedId) {
         if (message.chatType === 'group' && message.repliedMessage?.sender.userId) {
-            // go-cqhttp需要连续发送两个@才能显示出来
-            // msgChunk.unshift({
-            //     type: 'text',
-            //     data: { text: ' ' }
-            // });
-            // msgChunk.unshift({
-            //     type: 'at',
-            //     data: { qq: message.repliedMessage.sender.userId }
-            // });
-            // msgChunk.unshift({
-            //     type: 'text',
-            //     data: { text: ' ' }
-            // });
+            msgChunk = [
+                {
+                    type: 'reply',
+                    data: { id: message.repliedId }
+                },
+                {
+                    type: 'at',
+                    data: { qq: message.repliedMessage.sender.userId }
+                },
+                {
+                    type: 'text',
+                    data: { text: ' ' }
+                },
+                ...msgChunk
+            ];
+        } else {
             msgChunk.unshift({
-                type: 'at',
-                data: { qq: message.repliedMessage.sender.userId }
+                type: 'reply',
+                data: { id: message.repliedId }
             });
         }
-        msgChunk.unshift({
-            type: 'reply',
-            data: { id: message.repliedId }
-        });
     }
 
     return msgChunk;

@@ -1,8 +1,6 @@
 import { CommonReceivedMessage } from "#ibot/message/Message";
-import App from "#ibot/App";
-import { CommandInputArgs, PluginEvent } from "#ibot/PluginManager";
 import { PluginController } from "#ibot-api/PluginController";
-import { label } from "#ibot-api/dataWrapper";
+import { CommandInputArgs } from "#ibot/types/event";
 
 export const defaultConfig = {
     messages: {

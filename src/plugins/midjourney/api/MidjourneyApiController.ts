@@ -7,7 +7,8 @@ import WebSocket from "isomorphic-ws";
 import { CommonReceivedMessage, ImageMessage } from "#ibot/message/Message";
 import got, { OptionsOfTextResponseBody } from "got";
 import { UserRequestError } from "#ibot-api/error/errors";
-import { detectImageType } from "#ibot/utils/file";
+import { detectImageType, loadMessageImage } from "#ibot/utils/file";
+import PublicAssetsController from "../../public-assets/PluginController";
 
 export enum MJModel {
     MJ = 'mj',
@@ -30,6 +31,7 @@ export type ImagineTaskInfo = {
     refUrl?: string,
     model: MJModel,
     relax: boolean,
+    cancelled?: boolean,
 };
 
 export type QueuedImagineTask = QueuedTask<'imagine', ImagineTaskInfo>;
@@ -228,6 +230,24 @@ export class MidjourneyApiController {
         });
     }
 
+    public cancelImagineTask(msgId: string) {
+        for (let task of this.relaxTasks) {
+            if (task.message.id === msgId && task.type === 'imagine') {
+                task.cancelled = true;
+                this.logger.debug("已取消Imagine任务：" + msgId);
+                return;
+            }
+        }
+
+        for (let task of this.fastTasks) {
+            if (task.message.id === msgId && task.type === 'imagine') {
+                task.cancelled = true;
+                this.logger.debug("已取消Imagine任务：" + msgId);
+                return;
+            }
+        }
+    }
+
     public upscaleImage(task: UpscaleTaskInfo) {
         return new Promise<void>((resolve, reject) => {
             this.fastTasks.push({
@@ -329,12 +349,32 @@ export class MidjourneyApiController {
     }
 
     public async handleImagineTask(currentTask: QueuedImagineTask) {
+        if (currentTask.cancelled) {
+            currentTask.resolve();
+            return;
+        }
+
         let client: CustomMidjourney | null = null;
 
         let api = this.mainController.getMostMatchedApi(currentTask.prompt, currentTask.subjectType);
         this.logger.debug("使用API: " + api.id);
 
         let prompt = currentTask.prompt;
+
+        if (currentTask.refUrl && !currentTask.refUrl.startsWith('http')) {
+            let imageData = await loadMessageImage(currentTask.refUrl);
+            if (!imageData) {
+                throw new UserRequestError('无法加载参考图片。');
+            }
+
+            const assets = this.app.getPlugin<PublicAssetsController>('public_assets');
+            if (!assets) {
+                throw new UserRequestError('无法上传图片，需要安装PublicAssets插件。');
+            }
+
+            let imageAsset = await assets.createAsset(imageData.content, { mimeType: imageData.type });
+            currentTask.refUrl = imageAsset.url;
+        }
 
         // 附加参数
         let params: string[] = []
@@ -370,14 +410,14 @@ export class MidjourneyApiController {
             let noticeSent = false;
 
             try {
-                currentTask.message.sendReply('安排了', true);
-
                 let timeoutMinutes = currentTask.relax ? 12 : 6; // Relax任务12分钟，Fast任务5分钟
 
                 imagineRes = await withTimeout(timeoutMinutes * 60 * 1000, client.Imagine(
                     prompt,
                     (uri: string, progress: string) => {
                         if (!noticeSent) {
+                            if (currentTask.cancelled) return;
+
                             currentTask.message.sendReply('在画了在画了', true).catch(console.error);
                             noticeSent = true;
                         }
@@ -409,24 +449,26 @@ export class MidjourneyApiController {
             image = await this.compressThumb(image);
             let imgType = detectImageType(image);
 
-            await currentTask.message.sendReply([
-                {
-                    type: ['image'],
-                    text: '[图片]',
-                    data: {
-                        url: 'blob:',
-                        blob: new Blob([image], { type: imgType }),
-                    }
-                } as ImageMessage
-            ], false, {
-                isMidjourneyResult: true,
-                prompt: currentTask.prompt,
-                mjType: 'imagine',
-                mjApi: api.id,
-                mjMsgId: imagineRes.id,
-                mjHash: imagineRes.hash,
-                mjFlags: imagineRes.flags,
-            });
+            if (!currentTask.cancelled) {
+                await currentTask.message.sendReply([
+                    {
+                        type: ['image'],
+                        text: '[图片]',
+                        data: {
+                            url: 'blob:',
+                            blob: new Blob([image], { type: imgType }),
+                        }
+                    } as ImageMessage
+                ], false, {
+                    isMidjourneyResult: true,
+                    prompt: currentTask.prompt,
+                    mjType: 'imagine',
+                    mjApi: api.id,
+                    mjMsgId: imagineRes.id,
+                    mjHash: imagineRes.hash,
+                    mjFlags: imagineRes.flags,
+                });
+            }
 
             currentTask.resolve();
         } catch (e: any) {
@@ -548,8 +590,6 @@ export class MidjourneyApiController {
             let res: MJMessage | null = null;
 
             try {
-                currentTask.message.sendReply('安排了', true);
-
                 let noticeSent = false;
 
                 let timeoutMinutes = currentTask.relax ? 12 : 6; // Relax任务12分钟，Fast任务5分钟

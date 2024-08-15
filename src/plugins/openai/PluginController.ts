@@ -1,5 +1,4 @@
 import { CommonReceivedMessage, ImageMessage, MessageChunk } from "#ibot/message/Message";
-import { CommandInputArgs } from "#ibot/PluginManager";
 import { encode as gptEncode } from 'gpt-3-encoder';
 import got from "got/dist/source";
 import { RandomMessage } from "#ibot/utils/RandomMessage";
@@ -15,6 +14,7 @@ import { OpenAIGetGlobalLLMFunctions } from "./types/events";
 import PublicAssetsController from "../public-assets/PluginController";
 import { readFile } from "fs/promises";
 import { detectImageType } from "#ibot/utils/file";
+import { CommandInputArgs } from "#ibot/types/event";
 
 export type ChatGPTApiMessage = {
     role: 'summary' | 'assistant' | 'user' | 'function' | 'tool',

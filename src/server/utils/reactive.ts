@@ -4,6 +4,7 @@ export type Reactive<T extends Object = any> = T & {
     _on: EventEmitter['on'];
     _once: EventEmitter['once'];
     _off: EventEmitter['off'];
+    _offAll: EventEmitter['removeAllListeners'];
     _isReactive: true;
     _value: T;
     updated: () => void;
@@ -23,7 +24,9 @@ export function reactive<T extends Object>(obj: T): Reactive<T> {
 
         const value = obj[key as keyof T];
         if (typeof value === 'object' && (value as Reactive<{}>)._isReactive) {
-            (value as Reactive<{}>)._on('change', (childKey: string, newValue: any) => {
+            const valueRef = value as Reactive<{}>;
+            valueRef._offAll();
+            valueRef._on('change', (childKey: string, newValue: any) => {
                 eventEmitter.emit('change', key, value);
                 eventEmitter.emit(`change:${key}`, value);
             });
@@ -38,6 +41,7 @@ export function reactive<T extends Object>(obj: T): Reactive<T> {
                     value = reactive(value);
                 }
 
+                value._offAll();
                 value._on('change', (childKey: string, newValue: any) => {
                     eventEmitter.emit('change', key, value);
                     eventEmitter.emit(`change:${key.toString()}`, value);
@@ -54,6 +58,8 @@ export function reactive<T extends Object>(obj: T): Reactive<T> {
                     return eventEmitter.once.bind(eventEmitter);
                 case '_off':
                     return eventEmitter.off.bind(eventEmitter);
+                case '_offAll':
+                    return eventEmitter.removeAllListeners.bind(eventEmitter);
                 case '_isReactive':
                     return true;
                 case '_value':

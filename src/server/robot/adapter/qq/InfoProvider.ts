@@ -85,18 +85,31 @@ export class QQInfoProvider {
         }
     }
 
-    public saveMessage<T extends CommonMessage>(message: T): Reactive<T> {
+    public async saveMessage<T extends CommonMessage>(message: T): Promise<Reactive<T>> {
         if (this.storages) {
-            this.storages.message.set(message).catch((err: any) => {
+            try {
+                await this.storages.message.set(message);
+            } catch (err: any) {
                 this.app.logger.error(`将消息保存到数据库出错: ${err.message}`);
-                console.error(err);
-            });
+            }
 
             return this.storages.message.reactive(message);
         } else {
             return reactive(message);
         }
     }
+
+    public async getMessage(messageId: string): Promise<Reactive<CommonMessage> | null> {
+        if (this.storages) {
+            let msg = await this.storages.message.get(messageId);
+            if (msg) {
+                return this.storages.message.reactive(msg);
+            }
+        }
+
+        return null;
+    }
+
 
     async getGroupList(): Promise<any[]> {
         const res = await this.robot.callRobotApi('get_group_list', {});

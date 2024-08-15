@@ -1,13 +1,14 @@
 import App from "./App";
 import { CommandOverrideConfig } from "./types/config";
 import { PermissionDeniedError, RateLimitError } from "../api/error/errors";
-import { CommonReceivedMessage } from "./message/Message";
+import { CommonMessage, CommonReceivedMessage } from "./message/Message";
 import { ChatIdentity } from "./message/Sender";
-import { CommandInfo, CommandInputArgs, EventScope, MessageEventOptions, MessagePriority, PluginEvent } from "./PluginManager";
+import { CommandInfo, EventScope, MessagePriority, PluginEvent } from "./PluginManager";
 import { Robot } from "./robot/Robot";
 import { SubscribeItem, SubscribeTargetInfo } from "./SubscribeManager";
 import { Reactive } from "./utils/reactive";
 import { chatIdentityToString, messageChunksToXml } from "./utils";
+import { CommandInputArgs, MessageEventOptions } from "./types/event";
 
 export type ControllerEventInfo = {
     priority: number;
@@ -318,6 +319,8 @@ export class EventManager {
             param
         };
 
+        message.extra.command = commandArgs;
+
         const sender = this.getSenderInfo(message);
         const userRules = await this.app.role.getUserRules(sender);
 
@@ -344,6 +347,10 @@ export class EventManager {
 
     public async emitFilterSendMessage(message: Reactive<CommonReceivedMessage>) {
         
+    }
+
+    public async emitDeleteMessage(message: Reactive<CommonMessage>) {
+        return await this.emit('deleteMessage', {}, message);
     }
 
     public getSenderInfo(message: CommonReceivedMessage): ChatIdentity {

@@ -1,16 +1,12 @@
 import { PluginController } from "#ibot-api/PluginController";
-import { CommonReceivedMessage, CommonSendMessage, ImageMessage } from "#ibot/message/Message";
-import got, { OptionsOfTextResponseBody } from "got/dist/source";
+import { CommonReceivedMessage, CommonSendMessage } from "#ibot/message/Message";
+import got from "got/dist/source";
 import ChatGPTController from "../openai/PluginController";
-import { UserRequestError } from "#ibot-api/error/errors";
-import { FetchFn, Midjourney, MidjourneyApi, MJBot, MJConfigParam, MJMessage, NijiBot } from "midjourney";
-import { asleep, chatIdentityToString, withTimeout } from "#ibot/utils";
-import { CommandInputArgs } from "#ibot/PluginManager";
+import { UserCancelledError, UserRequestError } from "#ibot-api/error/errors";
+import { chatIdentityToString, ItemLimitedList, splitPrefix } from "#ibot/utils";
 import { MidjourneyApiController, MJModel } from "./api/MidjourneyApiController";
-import { BaseSender, ChatIdentity } from "#ibot/message/Sender";
-import { readFile } from "fs/promises";
-import { detectImageType, loadMessageImage } from "#ibot/utils/file";
-import PublicAssetsController from "../public-assets/PluginController";
+import { BaseSender } from "#ibot/message/Sender";
+import { CommandInputArgs } from "#ibot/types/event";
 
 export type ApiConfig = {
     id: string,
@@ -70,6 +66,8 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
     private mainApi!: ApiConfig;
     private defaultSize!: SizeConfig;
+
+    private cancelledMessageIds = new ItemLimitedList<string>(100);
 
     private running = true;
 
@@ -144,6 +142,18 @@ export default class MidjourneyController extends PluginController<typeof defaul
             resolve();
 
             return this.variantImage(args, message, repliedMessage as CommonSendMessage);
+        });
+
+        this.event.on('deleteMessage', async (message, resolved) => {
+            if (message.extra.handler === this.pluginInfo.id && message.extra.reqType === 'text2img') {
+                resolved();
+                
+                message.extra.cancelled = true;
+                if (message.id) {
+                    this.mjApi.cancelImagineTask(message.id);
+                    this.cancelledMessageIds.push(message.id);
+                }
+            }
         });
     }
 
@@ -274,6 +284,9 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
     public async text2img(input: string | CommandInputArgs, message: CommonReceivedMessage, options: Text2ImgRuntimeOptions = {}) {
         try {
+            message.extra.handler = this.pluginInfo.id;
+            message.extra.reqType = 'text2img';
+
             let isSponsored = await this.checkSponsoredAndRateLimit(message);
 
             let prompt = '';
@@ -295,8 +308,13 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
                 for (const [i, chunk] of message.content.entries()) {
                     if (chunk.type.includes('text') && chunk.text) {
-                        if (i === 0) { // 去除命令
-                            prompt = chunk.text.substring(input.command.length) ?? '';
+                        if (i === 0) {
+                            prompt = chunk.text ?? '';
+                            // 移除命令
+                            let parts = splitPrefix(prompt ?? '', input.command);
+                            if (parts.length === 2) {
+                                prompt = parts[1].trimStart();
+                            }
                         } else {
                             prompt += chunk.text;
                         }
@@ -306,22 +324,12 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 }
             }
 
-            if (refImage && !refImage.startsWith('http')) {
-                let imageData = await loadMessageImage(refImage);
-                if (!imageData) {
-                    throw new UserRequestError('无法加载参考图片。');
-                }
+            prompt = prompt.trim();
 
-                const assets = this.app.getPlugin<PublicAssetsController>('public_assets');
-                if (!assets) {
-                    throw new UserRequestError('无法上传图片，需要安装PublicAssets插件。');
-                }
-
-                let imageAsset = await assets.createAsset(imageData.content, { mimeType: imageData.type });
-                refImage = imageAsset.url;
+            if (!prompt && !refImage) {
+                throw new UserRequestError('请输入绘图内容或提供参考图片。');
             }
 
-            prompt = prompt.trim();
             this.logger.debug("收到绘图请求: " + prompt);
             if (refImage) {
                 this.logger.debug("参考图片: " + refImage);
@@ -396,9 +404,16 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
             let mjModel = options.model ?? MJModel.MJ;
 
+            if (message.extra.cancelled || this.cancelledMessageIds.includes(message.id!)) {
+                this.logger.debug('用户取消生成图片');
+                throw new UserCancelledError();
+            }
+
             // 增加请求计数
             const userSessionStore = message.session.user;
             await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
+
+            message.sendReply('安排了', true);
 
             const promise = this.mjApi.imagine({
                 message,
@@ -419,12 +434,14 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 promise,
             };
         } catch (err: any) {
-            if (err instanceof UserRequestError) {
+            if (err.name === 'UserRequestError') {
                 if (!options.noErrorReply) {
                     await message.sendReply(err.message, true);
                 } else {
                     throw err;
                 }
+                return;
+            } else if (err.name === 'UserCancelledError') {
                 return;
             }
 
@@ -528,6 +545,8 @@ export default class MidjourneyController extends PluginController<typeof defaul
             // 增加请求计数
             const userSessionStore = message.session.user;
             await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
+            
+            message.sendReply('安排了', true);
 
             const promise = this.mjApi.variantImage({
                 message,
@@ -549,7 +568,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 return;
             }
 
-            this.logger.error("Upscale图片失败", err);
+            this.logger.error("Variant图片失败", err);
             console.error(err);
 
             if (err.name === 'HTTPError' && err.response) {

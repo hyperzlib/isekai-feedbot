@@ -1,5 +1,4 @@
 import { EventManager, EventMeta } from "./EventManager";
-import { CommonReceivedMessage } from "./message/Message";
 import fs from 'fs';
 import fsAsync from 'fs/promises';
 import chokidar from 'chokidar';
@@ -8,12 +7,10 @@ import App from "./App";
 import EventEmitter from "events";
 import path from "path";
 import { ChatIdentity } from "./message/Sender";
-import { Robot } from "./robot/Robot";
-import { Reactive } from "./utils/reactive";
 import { PluginController, PluginIndexFileType } from "#ibot-api/PluginController";
 import { PluginApiBridge } from "./plugin/PluginApiBridge";
 import { compareObject, prepareDir } from "./utils";
-import { CommandEvent, ListenEventsFunc } from "./types/event";
+import { CommandCallback, CommandEvent, EventListenerInfo, ListenEventsFunc, MessageCallback, MessageEventOptions } from "./types/event";
 
 export const MessagePriority = {
     LOWEST: 0,
@@ -36,30 +33,12 @@ export const MessagePriority = {
     HIGHEST: 100
 };
 
-export type MessageEventOptions = {
-    priority?: number,
-};
-
 export type CommandInfo = {
     command: string,
     name: string,
     alias?: string[],
     help?: string,
 };
-
-export type EventListenerInfo = {
-    priority: number;
-    callback: CallableFunction;
-}
-
-export type CommandInputArgs = {
-    command: string,
-    param: string,
-}
-
-export type MessageCallback = (message: Reactive<CommonReceivedMessage>, resolved: VoidFunction) => any;
-export type CommandCallback = (args: CommandInputArgs, message: Reactive<CommonReceivedMessage>, resolved: VoidFunction) => any;
-export type RawEventCallback = (robot: Robot, event: any, resolved: VoidFunction) => any;
 
 export type AllowedList = string[] | '*';
 
@@ -97,7 +76,7 @@ export class PluginManager extends EventEmitter {
         this.pluginPath = path.resolve(pluginPath);
         this.configPath = path.resolve(configPath);
         this.dataPath = path.resolve(dataPath);
-        
+
         this.pluginInstanceMap = new Map();
     }
 
@@ -143,7 +122,7 @@ export class PluginManager extends EventEmitter {
                 const controllerConfig = await this.loadMainConfig(plugin.id, plugin.controller);
 
                 await plugin.controller._initialize(controllerConfig);
-            } catch(err: any) {
+            } catch (err: any) {
                 this.app.logger.error(`插件 ${plugin.id} 初始化失败`, err);
                 console.error(err);
 
@@ -157,7 +136,7 @@ export class PluginManager extends EventEmitter {
         for (let plugin of this.pluginInstanceMap.values()) {
             try {
                 await plugin.controller.postInit();
-            } catch(err: any) {
+            } catch (err: any) {
                 this.app.logger.error(`插件 ${plugin.id} 延迟初始化失败`, err);
                 console.error(err);
 
@@ -178,7 +157,7 @@ export class PluginManager extends EventEmitter {
         let pluginId = '';
         try {
             const pluginIndex = Yaml.parse(await fsAsync.readFile(pluginIndexFile, 'utf-8')) as PluginIndexFileType;
-            
+
             if (!pluginIndex || typeof pluginIndex.controller !== "string") {
                 this.app.logger.error('插件 ' + folder + ' 没有指定主文件');
                 return;
@@ -202,7 +181,7 @@ export class PluginManager extends EventEmitter {
             const controller = await import(controllerFile);
             if (controller) {
                 const controllerClass: typeof PluginController = controller.default ?? controller;
-                
+
                 const pluginApiBridge = new PluginApiBridge(this.app, pluginId);
                 const controllerInstance: PluginController = new controllerClass(this.app, pluginApiBridge, pluginIndex);
 
@@ -227,7 +206,7 @@ export class PluginManager extends EventEmitter {
                 if (isReload) {
                     this.app.logger.info(`已重新加载插件: ${pluginId}`);
                     this.emit('pluginReloaded', controllerInstance);
-                    
+
                     // 重新加载权限
                     await this.app.role.onPluginLoaded();
                 } else {
@@ -238,7 +217,7 @@ export class PluginManager extends EventEmitter {
                 if (isReload) { // 重新加载插件时，加载后就执行延迟加载函数
                     try {
                         await controllerInstance.postInit();
-                    } catch(err: any) {
+                    } catch (err: any) {
                         this.app.logger.error(`插件 ${pluginId} 延迟初始化失败`, err);
                         console.error(err);
 
@@ -251,7 +230,7 @@ export class PluginManager extends EventEmitter {
             } else {
                 throw new Error('PluginController does not have an export.');
             }
-        } catch(err: any) {
+        } catch (err: any) {
             console.error(`加载插件失败: ${folder}`);
             console.error(err);
 
@@ -268,9 +247,9 @@ export class PluginManager extends EventEmitter {
 
             await instance.bridge.destroy();
             await instance.controller._destroy();
-            
+
             this.pluginInstanceMap.delete(pluginId);
-            
+
             if (this.configPluginMap.has(configFile)) {
                 this.configPluginMap.delete(configFile);
             }
@@ -322,7 +301,7 @@ export class PluginManager extends EventEmitter {
 
             if (fs.existsSync(configFile)) {
                 let localConfig = Yaml.parse(await fsAsync.readFile(configFile, 'utf-8'));
-                config = {...defaultConfig, ...localConfig};
+                config = { ...defaultConfig, ...localConfig };
                 if (!compareObject(config, localConfig)) {
                     shouldFill = true;
                     this.app.logger.info(`配置文件已生成: ${configFile}`);
@@ -341,7 +320,7 @@ export class PluginManager extends EventEmitter {
             }, 1000);
 
             return config;
-        } catch(err: any) {
+        } catch (err: any) {
             this.app.logger.error(`加载插件主配置文件失败: ${configFile}`, err);
             console.error(err);
         }
@@ -359,12 +338,12 @@ export class PluginManager extends EventEmitter {
                         await this.reloadPlugin(pluginId);
                         return;
                     }
-                    
+
                     const localConfig = Yaml.parse(await fsAsync.readFile(file, 'utf-8'));
                     await pluginInstance.controller._setConfig(localConfig);
                     this.app.logger.info(`已重载插件配置文件: ${pluginId}`);
                 }
-            } catch(err: any) {
+            } catch (err: any) {
                 this.app.logger.error(`重载插件 [${pluginId}] 配置失败: ${file}`, err);
                 console.error(err);
             }
@@ -504,9 +483,9 @@ export class EventScope {
         };
         this.eventList[event].push(eventInfo);
         this.eventSorted[event] = false;
-        
+
         this.afterAddEventListener(event, callback, options);
-    }
+    };
 
     /**
      * Remove event handler.
@@ -574,7 +553,7 @@ export class EventScope {
                 this.on<CommandEvent>(`command/${cmd.toLocaleLowerCase()}`, callback, options);
             });
         }
-        
+
         this.afterAddCommand(commandInfo as any);
     }
 
@@ -595,7 +574,7 @@ export class PluginEvent extends EventScope {
     public allowChannel = true;
 
     public allowedRobotTypeList: AllowedList = '*';
-    
+
     public isAllowSubscribe: (source: ChatIdentity) => boolean = (source) => {
         if (this.allowedRobotTypeList !== '*' && !this.allowedRobotTypeList.includes(source.robot.type)) {
             return false;

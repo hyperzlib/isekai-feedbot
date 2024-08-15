@@ -5,6 +5,7 @@ import { LiteralUnion } from "../types/misc";
 import { Robot } from "#ibot/robot/Robot";
 import { Reactive, reactive } from "#ibot/utils/reactive";
 import { escapeHtml } from "#ibot/utils";
+import { CommandInputArgs } from "#ibot/types/event";
 
 export enum MessageDirection {
     RECEIVE = 1,
@@ -74,6 +75,16 @@ export interface MentionMessage extends MessageChunk {
 export type CommonMessageType = LiteralUnion<"text" | "reference" | "image" | "record" | "media" | "toast">;
 export type CommonMessageChatType = LiteralUnion<"private" | "group" | "channel">;
 
+export type MessageMetaDataType = Partial<{
+    command: CommandInputArgs;
+    /** 处理这条消息的插件，需要由插件自行添加标记 */
+    handler: string;
+    /** 消息的request类型，和handler绑定 */
+    reqType: string;
+}>;
+
+export type MessageExtraType = MessageMetaDataType & Record<string, any>;
+
 export enum AddReplyMode {
     /** 不回复私聊 */
     IGNORE_PRIVATE = 1,
@@ -98,7 +109,7 @@ export class CommonMessage {
     deleted: boolean = false;
 
     /** 附加信息 */
-    extra: any = reactive({});
+    extra: MessageExtraType = reactive({});
 
     /** 临时上下文信息，不会保存到数据库 */
     _context: any = {};
@@ -350,6 +361,7 @@ export class CommonReceivedMessage extends CommonMessage {
         }
 
         if (addReply) {
+            newMessage.repliedMessage = this;
             newMessage.repliedId = this.id;
         }
 

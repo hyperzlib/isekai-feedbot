@@ -1,6 +1,6 @@
 import App from "#ibot/App";
 import { AddReplyMode, CommonReceivedMessage } from "#ibot/message/Message";
-import { CommandInputArgs, MessagePriority, PluginEvent } from "#ibot/PluginManager";
+import { MessagePriority, PluginEvent } from "#ibot/PluginManager";
 import got from "got/dist/source";
 import { RandomMessage } from "#ibot/utils/RandomMessage";
 import { QQForwardingMessage } from "#ibot/robot/adapter/qq/Message";
@@ -8,6 +8,7 @@ import QQRobot from "#ibot/robot/adapter/QQRobot";
 import { GroupSender } from "#ibot/message/Sender";
 import { Robot } from "#ibot/robot/Robot";
 import { PluginController } from "#ibot-api/PluginController";
+import { CommandInputArgs } from "#ibot/types/event";
 
 export type IsekaiBBSQuicklyPostConfig = {
     api_endpoint: string,

@@ -178,6 +178,12 @@ export default class QQRobot implements RobotAdapter {
                                     case 'group_upload':
                                         this.handleGroupFile(message);
                                         break;
+                                    case 'friend_recall':
+                                        this.handleDeleteMessage(message.message_id.toString());
+                                        break;
+                                    case 'group_recall':
+                                        this.handleDeleteMessage(message.message_id.toString());
+                                        break;
                                 }
                                 break;
                         }
@@ -211,6 +217,12 @@ export default class QQRobot implements RobotAdapter {
                     switch (postData.notice_type) {
                         case 'group_upload':
                             this.handleGroupFile(postData);
+                            break;
+                        case 'friend_recall':
+                            this.handleDeleteMessage(postData.message_id.toString());
+                            break;
+                        case 'group_recall':
+                            this.handleDeleteMessage(postData.message_id.toString());
                             break;
                     }
                     break;
@@ -322,7 +334,7 @@ export default class QQRobot implements RobotAdapter {
                 await this.downloadImages(message.content);
 
                 // 保存消息
-                let messageRef = this.infoProvider.saveMessage(message);
+                let messageRef = await this.infoProvider.saveMessage(message);
 
                 // 处理原始消息
                 isResolved = await this.app.event.emitRawMessage(messageRef);
@@ -369,7 +381,7 @@ export default class QQRobot implements RobotAdapter {
             }
         } as QQAttachmentMessage);
 
-        let messageRef = this.infoProvider.saveMessage(message);
+        let messageRef = await this.infoProvider.saveMessage(message);
 
         let isResolved = false;
         // 处理原始消息
@@ -379,6 +391,13 @@ export default class QQRobot implements RobotAdapter {
         // 处理消息
         isResolved = await this.app.event.emitMessage(messageRef);
         if (isResolved) return;
+    }
+
+    async handleDeleteMessage(messageId: string) {
+        let deletedMessage = await this.infoProvider.getMessage(messageId);
+        if (deletedMessage) {
+            await this.app.event.emitDeleteMessage(deletedMessage);
+        }
     }
 
     getCommandContentText(message: CommonReceivedMessage) {
@@ -612,7 +631,7 @@ export default class QQRobot implements RobotAdapter {
 
             // 保存 Message ID
             if (res?.data?.message_id) {
-                message.id = res.data.message_id;
+                message.id = res.data.message_id.toString();
             }
             
             // 保存消息

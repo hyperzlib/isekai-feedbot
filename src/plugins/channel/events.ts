@@ -10,7 +10,7 @@ export type OnSubscribeChannelParams = {
     /** Subscribe issuer */
     target: ChatIdentity,
 };
-export type ChannelSubscibeEvent = ['channel/subscribe', (params: OnSubscribeChannelParams) => Promise<void>];
+export type ChannelSubscibeEvent = { 'channel/subscribe': (params: OnSubscribeChannelParams) => Promise<void> };
 
 export type OnUnsubscribeChannelParams = {
     /** Channel type */
@@ -22,4 +22,4 @@ export type OnUnsubscribeChannelParams = {
     /** Unsubscribe issuer */
     target: ChatIdentity,
 };
-export type ChannelUnsubscribeEvent = ['channel/unsubscribe', (params: OnUnsubscribeChannelParams) => Promise<void>];
+export type ChannelUnsubscribeEvent = { 'channel/unsubscribe': (params: OnUnsubscribeChannelParams) => Promise<void> };

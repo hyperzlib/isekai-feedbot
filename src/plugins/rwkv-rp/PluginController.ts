@@ -1,11 +1,12 @@
 import { CommonReceivedMessage } from "#ibot/message/Message";
-import { CommandInputArgs, MessagePriority } from "#ibot/PluginManager";
+import { MessagePriority } from "#ibot/PluginManager";
 import { encode as gptEncode } from 'gpt-3-encoder';
 import got, { OptionsOfTextResponseBody } from "got/dist/source";
 import { HttpsProxyAgent } from 'hpagent';
 import { RandomMessage } from "#ibot/utils/RandomMessage";
 import { ChatIdentity } from "#ibot/message/Sender";
 import { PluginController } from "#ibot-api/PluginController";
+import { CommandInputArgs } from "#ibot/types/event";
 
 export type CharacterConfig = {
     api_id: string,
