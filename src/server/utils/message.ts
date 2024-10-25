@@ -1,6 +1,6 @@
 import { BASE_MESSAGE_CHUNK_TYPES, MessageChunk } from "../message/Message";
-import { JSDOM } from "jsdom";
-import { camelCaseToHyphen, hyphenToCamelCase } from "./helpers";
+import { XMLParser, XMLBuilder } from "fast-xml-parser";
+import { camelCaseToHyphen } from "./helpers";
 
 export function getMessageChunkBaseType(chunk: MessageChunk): string {
     for (let type of chunk.type) {
@@ -18,51 +18,75 @@ export function getMessageChunkBaseType(chunk: MessageChunk): string {
  * @returns 
  */
 export function messageChunksToXml(chunks: MessageChunk[]): string {
-    let dom = new JSDOM();
-    let document = dom.window.document;
+    let root: any[] = [];
     for (let el of chunks) {
         if (el.type.includes('text')) {
-            let text = document.createTextNode(el.text ?? '');
-            document.body.appendChild(text);
+            let node = {
+                '#text': el.text,
+            };
+            root.push(node);
         } else {
             let baseType = getMessageChunkBaseType(el);
-            let elNode = document.createElement(baseType);
+            let node: any = {};
+            node[baseType] = [];
+
+            let attrs: Record<string, string> = {};
 
             if (el.type.length > 1) {
                 // 添加type信息
                 let variantType = el.type.filter((type) => type !== baseType);
-                elNode.setAttribute('type', variantType.join(' '));
+                attrs.type = variantType.join(' ');
             }
 
             if (el.text) {
-                elNode.textContent = el.text;
+                node['#text'] = el.text;
             }
 
             if (el.data) {
                 for (let key in el.data) {
                     const value = el.data[key];
-                    let attrKey = camelCaseToHyphen(key);
-                    switch (typeof value) { // 根据数据类型，在属性名前添加前缀
-                        case 'boolean':
-                            elNode.setAttribute(`:${attrKey}`, value ? 'true' : 'false');
-                            break;
-                        case 'number':
-                            elNode.setAttribute(`:${attrKey}`, value.toString());
-                            break;
-                        case 'object':
-                            elNode.setAttribute(`:${attrKey}`, JSON.stringify(value));
-                            break;
-                        default:
-                            elNode.setAttribute(attrKey, value);
+                    if (typeof value === 'string') {
+                        attrs[key] = value;
+                    } else {
+                        attrs[`:${key}`] = JSON.stringify(value);
                     }
                 }
             }
 
-            document.body.appendChild(elNode);
+            if (Object.keys(attrs).length > 0) {
+                node[':@'] = attrs;
+            }
+
+            root.push(node);
         }
     }
 
-    return document.body.innerHTML;
+    let builder = new XMLBuilder({
+        preserveOrder: true,
+        ignoreAttributes: false,
+        suppressEmptyNode: true,
+        attributeNamePrefix: '',
+        unpairedTags: ['newmsg'],
+    });
+
+    let wrappedXml = builder.build([
+        {
+            "message": root
+        }
+    ]);
+
+    let xml = wrappedXml.replace(/^<message>|<\/message>$/g, '');
+
+    return xml;
+}
+
+function getFxpNodeName(node: any): string {
+    for (let key of Object.keys(node)) {
+        if (key !== ':@') {
+            return key as string;
+        }
+    }
+    return '';
 }
 
 /**
@@ -74,22 +98,32 @@ export function parseMessageChunksFromXml(xml: string): MessageChunk[]
 export function parseMessageChunksFromXml(xml: string, multiMessage: false): MessageChunk[]
 export function parseMessageChunksFromXml(xml: string, multiMessage: true): MessageChunk[][]
 export function parseMessageChunksFromXml(xml: string, multiMessage: boolean = false): MessageChunk[] | MessageChunk[][] {
-    let dom = new JSDOM(xml);
-    let document = dom.window.document;
+    let parser = new XMLParser({
+        preserveOrder: true,
+        trimValues: false,
+        ignoreAttributes: false,
+        attributeNamePrefix: '',
+        removeNSPrefix: false,
+        unpairedTags: ['newmsg'],
+    });
     let chunksGroup: MessageChunk[][] = [];
     let chunks: MessageChunk[] = [];
 
-    const stdHtmlElMap: Record<string, string> = {
-        img: 'image',
-    };
+    let wrappedXml = `<message>${xml}</message>`;
 
     let prevType = '';
-    for (let node of document.body.childNodes) {
-        if (node.nodeType === 3 /* Node.TEXT_NODE */) {
-            let textContent = node.textContent ?? '';
+    let parsedXml = parser.parse(wrappedXml);
+    let root = parsedXml[0]?.message;
+    if (!root) {
+        return [];
+    }
 
-            if (prevType === 'br') {
-                // 如果之前是br，删除第一个换行
+    for (let node of root) {
+        if ('#text' in node) { // 文本内容
+            let textContent = node['#text'] ?? '';
+
+            if (prevType === 'newmsg') {
+                // 如果之前是newmsg，删除第一个换行
                 textContent = textContent.replace(/^\n/, '');
             }
 
@@ -109,12 +143,13 @@ export function parseMessageChunksFromXml(xml: string, multiMessage: boolean = f
                 });
                 prevType = 'text';
             }
-        } else if (node.nodeType === 1 /* Node.ELEMENT_NODE */) {
-            const el = node as Element;
-            let tagType = el.tagName.toLowerCase();
-            tagType = stdHtmlElMap[tagType] ?? tagType;
+        } else { // 元素节点
+            let tagType = getFxpNodeName(node);
+            if (!tagType) {
+                continue;
+            }
 
-            if (tagType === 'br') {
+            if (tagType === 'newmsg') {
                 // 切分消息或换行
                 if (multiMessage) { // 多消息模式，切分消息
                     if (chunks.length) {
@@ -131,23 +166,25 @@ export function parseMessageChunksFromXml(xml: string, multiMessage: boolean = f
                     }
                 }
             } else {
-                let variantType = el.getAttribute('type')?.split(' ') ?? [];
+                let attrs = node[':@'] ?? {};
+                let variantType = attrs.type ?? [];
                 let fullType: string[] = [tagType, ...variantType];
 
-                let text = el.textContent;
+                let text = node['#text'] ?? '';
                 let data: Record<string, any> = {};
-                for (let attr of el.attributes) {
-                    let key = hyphenToCamelCase(attr.name);
-                    let value = attr.value;
+                for (let key in attrs) {
+                    let value = attrs[key];
                     if (key.startsWith(':')) {
                         // 特殊类型
                         try {
                             key = key.slice(1);
-                            value = eval('return ' + value);
+                            value = JSON.parse(value);
                             data[key] = value;
                         } catch (e) {
                             console.error('Failed to parse special type attribute:', e);
                         }
+                    } else {
+                        data[key] = value;
                     }
                 }
 
