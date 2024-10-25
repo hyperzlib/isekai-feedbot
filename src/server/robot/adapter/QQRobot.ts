@@ -12,7 +12,7 @@ import { RobotConfig } from "../../types/config";
 import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
 import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
-import { asleep, messageChunksToXml } from "#ibot/utils";
+import { asleep, ItemLimitedList, messageChunksToXml } from "#ibot/utils";
 import { randomUUID } from "crypto";
 import path from "path";
 import { detectImageType } from "#ibot/utils/file";
@@ -42,6 +42,8 @@ export type QueryQueueItem = {
 }
 
 export default class QQRobot implements RobotAdapter {
+    public _ignoreReactive = true; // 忽略Reactive的嵌套
+
     public readonly IMG_CACHE_EXPIRE = 7 * 86400 * 1000; // 7天
 
     public imgCleanupTask?: CronJob;
@@ -67,6 +69,8 @@ export default class QQRobot implements RobotAdapter {
     private socketResponseQueue: Record<string, QueryQueueItem> = {};
     private socketQueueRunning: boolean = false;
     private socketQueueCleanerTaskId?: NodeJS.Timer;
+
+    private deletedMessageIds = new ItemLimitedList<string>(100);
 
     private taskId?: NodeJS.Timer;
 
@@ -333,8 +337,18 @@ export default class QQRobot implements RobotAdapter {
                 // 下载图片
                 await this.downloadImages(message.content);
 
+                if (this.deletedMessageIds.includes(message.id!)) {
+                    // 消息已被删除
+                    message.deleted = true;
+                }
+
                 // 保存消息
                 let messageRef = await this.infoProvider.saveMessage(message);
+
+                if (message.deleted) { // 不处理已删除的消息
+                    this.app.logger.debug(`收到已删除的消息：${message.id}`);
+                    return;
+                }
 
                 // 处理原始消息
                 isResolved = await this.app.event.emitRawMessage(messageRef);
@@ -397,6 +411,8 @@ export default class QQRobot implements RobotAdapter {
         let deletedMessage = await this.infoProvider.getMessage(messageId);
         if (deletedMessage) {
             await this.app.event.emitDeleteMessage(deletedMessage);
+        } else {
+            this.deletedMessageIds.push(messageId);
         }
     }
 
@@ -463,7 +479,7 @@ export default class QQRobot implements RobotAdapter {
                                 break;
                         }
                         
-                        await fs.promises.writeFile(imgFile, res);
+                        await fs.promises.writeFile(imgFile, new Uint8Array(res));
 
                         chunk.data.url = 'file://' + imgFile;
 
@@ -667,7 +683,7 @@ export default class QQRobot implements RobotAdapter {
 
                 let imgExt = detectImageType(imgData) ?? 'png';
 
-                await fs.promises.writeFile(imgFile + '.' + imgExt, imgData);
+                await fs.promises.writeFile(imgFile + '.' + imgExt, new Uint8Array(imgData));
                 this.app.logger.debug(`发送的图片已保存：${imgFile}.${imgExt}`);
 
                 chunk.data.url = 'file://' + imgFile + '.' + imgExt;

@@ -397,6 +397,8 @@ export class MidjourneyApiController {
 
         prompt += ' ' + params.join(' ');
 
+        let promptWithoutUrl = prompt;
+
         if (currentTask.refUrl) {
             prompt = currentTask.refUrl + ' ' + prompt;
         }
@@ -410,7 +412,7 @@ export class MidjourneyApiController {
             let noticeSent = false;
 
             try {
-                let timeoutMinutes = currentTask.relax ? 12 : 6; // Relax任务12分钟，Fast任务5分钟
+                let timeoutMinutes = currentTask.relax ? 12 : 8; // Relax任务12分钟，Fast任务5分钟
 
                 imagineRes = await withTimeout(timeoutMinutes * 60 * 1000, client.Imagine(
                     prompt,
@@ -418,7 +420,7 @@ export class MidjourneyApiController {
                         if (!noticeSent) {
                             if (currentTask.cancelled) return;
 
-                            currentTask.message.sendReply('在画了在画了', true).catch(console.error);
+                            currentTask.message.sendReply('正在画：' + promptWithoutUrl, true).catch(console.error);
                             noticeSent = true;
                         }
                     }

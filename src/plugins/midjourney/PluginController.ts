@@ -147,6 +147,8 @@ export default class MidjourneyController extends PluginController<typeof defaul
         this.event.on('deleteMessage', async (message, resolved) => {
             if (message.extra.handler === this.pluginInfo.id && message.extra.reqType === 'text2img') {
                 resolved();
+
+                console.log('typeof message.id: ', typeof message.id);
                 
                 message.extra.cancelled = true;
                 if (message.id) {

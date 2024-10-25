@@ -1,16 +1,11 @@
 import Pusher from 'pusher-js';
-import { FSWatcher, watch } from 'chokidar';
-import Yaml from 'yaml';
-import * as fs from 'fs';
-import { NotFoundError, ParseError, PluginDependencyError } from "#ibot-api/error/errors";
+import { ParseError, PluginDependencyError } from "#ibot-api/error/errors";
 import { PluginController } from "#ibot-api/PluginController";
-import { basename, resolve } from "path";
+import { resolve } from "path";
 import { ReactiveConfig } from '#ibot/utils/ReactiveConfig';
 import ChannelFrameworkController, { ChannelInfo } from '../channel/PluginController';
-import { prepareDir } from '#ibot/utils';
 import { Next } from 'koa';
 import got from 'got';
-import { RouterContext } from 'koa-router';
 import { FullRestfulContext } from '#ibot/RestfulApiManager';
 
 const defaultConfig = {

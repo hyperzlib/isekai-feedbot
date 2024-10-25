@@ -15,6 +15,8 @@ export type TelegramRobotConfig = RobotConfig & {
 }
 
 export default class TelegramRobot implements RobotAdapter {
+    public _ignoreReactive = true; // 忽略Reactive的嵌套
+    
     private app: App;
 
     public type = 'telegram';

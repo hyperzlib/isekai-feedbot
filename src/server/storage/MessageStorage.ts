@@ -4,7 +4,7 @@ import { ModelRegistry } from "../DatabaseManager";
 import { ItemLimitedList } from "../utils/ItemLimitedList";
 import { CommonMessage, CommonSendMessage } from "../message/Message";
 import { RobotStorage } from "./RobotStorage";
-import { Reactive, reactive } from "../utils/reactive";
+import { observe, Reactive, reactive } from "../utils/reactive";
 import { debounce } from "throttle-debounce";
 import { CronJob } from 'cron';
 import mongoose from "mongoose";
@@ -104,7 +104,7 @@ export class MessageStorage {
             });
         });
 
-        messageRef._on('change', (key: string, val: Reactive<T>) => {
+        observe(messageRef, (key: string | null, val: Reactive<T>) => {
             onDataChanged();
         });
 

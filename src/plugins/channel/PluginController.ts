@@ -3,7 +3,7 @@ import Handlebars from "handlebars";
 import { PluginController } from "#ibot-api/PluginController";
 import { NotFoundError, ParseError } from "#ibot-api/error/errors";
 import { ChatIdentity } from "#ibot/message/Sender";
-import { arrayDiff, asleep, hashMd5, parseMessageChunksFromXml, setDiff, splitPrefix } from "#ibot/utils";
+import { asleep, hashMd5, parseMessageChunksFromXml, setDiff, splitPrefix } from "#ibot/utils";
 import { ReactiveConfig } from "#ibot/utils/ReactiveConfig";
 import { resolve } from "path";
 import { OnSubscribeChannelParams } from "./events";
