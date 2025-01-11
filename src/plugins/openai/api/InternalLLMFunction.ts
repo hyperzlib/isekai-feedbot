@@ -4,8 +4,7 @@ import ChatGPTController from "../PluginController";
 import { CommonReceivedMessage } from "#ibot/message/Message";
 import { LLMFunctionContainer } from "./LLMFunction";
 import { DashScopeMultiModelMessageItem } from "./ChatCompleteApi";
-import { readFile } from "fs/promises";
-import { detectImageType } from "#ibot/utils/file";
+import { loadMessageImage } from "#ibot/utils/file";
 
 export class InternalLLMFunction {
     public app: App;
@@ -16,7 +15,29 @@ export class InternalLLMFunction {
         this.mainController = mainController;
     }
 
+    private getFlowNameList() {
+        const flowPrompts = this.mainController.config.flow_prompts;
+        return Object.keys(flowPrompts).join('、');
+    }
+
     public async getLLMFunctions(functionContainer: LLMFunctionContainer) {
+        let flowNameList = this.getFlowNameList();
+        if (flowNameList !== "") {
+            functionContainer.register('query_function_conversation_flow', {
+                displayName: '查询函数对话流程',
+                description: '当你需要“' + this.getFlowNameList() + '”时，需要先查询对话流程，再根据流程进行对话。',
+                params: [
+                    {
+                        name: "flow_name",
+                        description: "对话流程名，必须是以下之一：" + this.getFlowNameList(),
+                        required: true,
+                        schema: { "type": "string" },
+                    },
+                ],
+                callback: this.flowPrompter.bind(this),
+            });
+        }
+
         functionContainer.register('get_date_time', {
             displayName: '获取当前时间',
             description: '当你想获取当前的日期和时间时非常有用。',
@@ -56,7 +77,7 @@ export class InternalLLMFunction {
                 // }
             ],
             callback: this.recognizeImage.bind(this),
-        })
+        });
     }
 
     public async destroy() {
@@ -149,13 +170,10 @@ export class InternalLLMFunction {
         try {
             await message?.sendReply('让我康康', true);
 
-            if (imageUrl.startsWith('file://')) {
-                let imagePath = imageUrl.replace('file://', '');
-                let imageBuffer = await readFile(imagePath);
-                let imageType = detectImageType(imageBuffer) ?? 'image/png';
-
+            const image = await loadMessageImage(imageUrl);
+            if (image) {
                 imageUrl = await this.mainController
-                    .chatCompleteApi!.uploadDashScopeFile(imageBuffer, imageType, apiConf);
+                    .chatCompleteApi!.uploadDashScopeFile(image.content, image.type, apiConf);
             }
 
             let res = await this.mainController.doApiRequest([
@@ -187,5 +205,21 @@ export class InternalLLMFunction {
 
             return `图片识别失败: ${err.message}`;
         }
+    }
+
+    public async flowPrompter(params: any, message?: CommonReceivedMessage): Promise<string> {
+        const flowPrompts = this.mainController.config.flow_prompts;
+        const flowName = params.flow_name;
+        this.mainController.logger.info('AI查询了流程提示：' + flowName);
+        if (!flowName) {
+            return '请提供对话流程的名字。';
+        }
+
+        if (!flowPrompts[flowName]) {
+            return '未找到对应的对话流程提示，按照正常对话处理。';
+        }
+
+        let prompt = flowPrompts[flowName];
+        return prompt;
     }
 }

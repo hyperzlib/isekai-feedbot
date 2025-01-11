@@ -1,6 +1,5 @@
 import { BASE_MESSAGE_CHUNK_TYPES, MessageChunk } from "../message/Message";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
-import { camelCaseToHyphen } from "./helpers";
 
 export function getMessageChunkBaseType(chunk: MessageChunk): string {
     for (let type of chunk.type) {

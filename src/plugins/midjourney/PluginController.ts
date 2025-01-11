@@ -7,6 +7,8 @@ import { chatIdentityToString, ItemLimitedList, splitPrefix } from "#ibot/utils"
 import { MidjourneyApiController, MJModel } from "./api/MidjourneyApiController";
 import { BaseSender } from "#ibot/message/Sender";
 import { CommandInputArgs } from "#ibot/types/event";
+import { loadMessageImage } from "#ibot/utils/file";
+import { DashScopeMultiModelMessageItem } from "../openai/api/ChatCompleteApi";
 
 export type ApiConfig = {
     id: string,
@@ -37,12 +39,19 @@ export type Text2ImgRuntimeOptions = {
 
 const LLM_PROMPT: string = "Please generate the Midjourney prompt according to the following requirements. The output format is:\n" +
     '```{"prompt": "[prompt content]", "size": "Must be one of (portrait|landscape|avatar)", "subject": "Must be one of (boy|girl|item|landscape|animal)"}```.\n' +
-    'The prompt should in simple English. You just need to output json. You need to describe the scene in detail. here are some formula for a Midjourney image prompt:' +
+    'The prompt should in simple English. You just need to output json. You need to describe the scene in detail.\n' +
+    'If there are multiple unrelated objects in a picture, please add double colons (::) between their prompt words to separate them. For example: Input: ```space ship```, the Midjourney will produces images of sci-fi spaceships. Input: ```space:: ship```, the Midjourney will produces images of a sailing ship traveling through space.\n'
+'\n' +
+    'Here are some formula for a Midjourney image prompt:\n' +
     ' - For characters: An image of [adjective] [subject] with [clothing, earring and accessories] [doing action]\n' +
     ' - For landscapes and items: An image of [subject] with [some creative details]\n' +
     '\n' +
-    '请根据以下要求生成：\n' +
+    '## User input:\n' +
     '{{{prompt}}}';
+
+const LLM_REFIMAGE_PROMPT = '\n\n' +
+    '## User provided reference image:\n' +
+    'Recognized image content: {{{prompt}}}';
 
 const defaultConfig = {
     api: [] as ApiConfig[],
@@ -149,7 +158,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 resolved();
 
                 console.log('typeof message.id: ', typeof message.id);
-                
+
                 message.extra.cancelled = true;
                 if (message.id) {
                     this.mjApi.cancelImagineTask(message.id);
@@ -252,7 +261,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
         const chatIdentity = (message.sender as BaseSender).identity;
 
         let userIdentityStr = chatIdentityToString({
-            type:'private',
+            type: 'private',
             robot: chatIdentity.robot,
             userId: chatIdentity.userId,
             userRoles: chatIdentity.userRoles,
@@ -332,109 +341,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 throw new UserRequestError('请输入绘图内容或提供参考图片。');
             }
 
-            this.logger.debug("收到绘图请求: " + prompt);
-            if (refImage) {
-                this.logger.debug("参考图片: " + refImage);
-            }
-
-            let paintSize: string | undefined;
-            let subjectType: string | undefined;
-            let isRaw = false;
-
-            let llmApi = this.app.getPlugin<ChatGPTController>('openai');
-
-            if (prompt.includes('--raw')) {
-                // 使用原prompt
-                prompt = prompt.replace(/--raw ?/g, '').trim();
-                subjectType = 'raw';
-                isRaw = true;
-            } else if (llmApi) {
-                // 使用ChatGPT生成Prompt
-                let messageList: any[] = [
-                    { role: 'system', content: 'You are a helpful assistant.' },
-                    { role: 'user', content: LLM_PROMPT.replace(/\{\{\{prompt\}\}\}/g, prompt) }
-                ];
-
-                let apiConf = llmApi.getApiConfigById(this.config.prompt_gen_llm_id ?? '');
-                let llmFunctions = await llmApi.getLLMFunctions();
-
-                let replyRes = await llmApi.doApiRequest(messageList, apiConf, {
-                    llmFunctions,
-                });
-                if (replyRes.outputMessage) {
-                    let reply = replyRes.outputMessage;
-                    this.logger.debug(`ChatGPT返回: ${reply}`);
-                    let matchedJson = reply.match(/\{[\s\S]*\}/);
-                    if (matchedJson) {
-                        let promptRes = JSON.parse(matchedJson[0]);
-                        if (promptRes) {
-                            prompt = promptRes.prompt;
-                            paintSize = promptRes.size;
-                            subjectType = promptRes.subject;
-                            this.logger.debug(`ChatGPT生成Prompt结果: ${prompt}, 画幅: ${paintSize}, 类型: ${subjectType}`);
-                        }
-                    } else {
-                        throw new UserRequestError(`生成Prompt失败: ${reply}`);
-                    }
-                } else {
-                    throw new UserRequestError(`生成Prompt失败: Prompt生成器返回为空`);
-                }
-            } else if (options.useTranslate) {
-                if (prompt.match(/[\u4e00-\u9fa5]/)) {
-                    prompt = await this.translateCaiyunAI(prompt);
-                    this.logger.debug("Prompt翻译结果: " + prompt);
-                    if (!prompt) {
-                        throw new UserRequestError('尝试翻译出错，过会儿再试试吧。');
-                    }
-                } else {
-                    this.logger.debug("Prompt不需要翻译");
-                }
-            }
-
-            let api = this.getMostMatchedApi(prompt, subjectType);
-            // 检查是否有禁用词
-            for (let matcher of this.bannedWordsMatcher) {
-                if (prompt.match(matcher)) {
-                    throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
-                }
-            }
-            for (let matcher of api._banned_words_matcher!) {
-                if (prompt.match(matcher)) {
-                    throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
-                }
-            }
-
-            let mjModel = options.model ?? MJModel.MJ;
-
-            if (message.extra.cancelled || this.cancelledMessageIds.includes(message.id!)) {
-                this.logger.debug('用户取消生成图片');
-                throw new UserCancelledError();
-            }
-
-            // 增加请求计数
-            const userSessionStore = message.session.user;
-            await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
-
-            message.sendReply('安排了', true);
-
-            const promise = this.mjApi.imagine({
-                message,
-                prompt,
-                noErrorReply: !!options.noErrorReply,
-                subjectType,
-                paintSize,
-                isRaw,
-                model: mjModel,
-                relax: !isSponsored,
-                refUrl: refImage,
-            });
-
-            return {
-                prompt,
-                paintSize,
-                subjectType,
-                promise,
-            };
+            return await this.generateImageFromPrompt(message, prompt, refImage, !isSponsored, options);
         } catch (err: any) {
             if (err.name === 'UserRequestError') {
                 if (!options.noErrorReply) {
@@ -491,13 +398,177 @@ export default class MidjourneyController extends PluginController<typeof defaul
         }
     }
 
-    public async upscaleImage(args: CommandInputArgs, message: CommonReceivedMessage, repliedMessage: CommonSendMessage) {
-        try {
-            let pickIndex = parseInt(args.param);
-            if (isNaN(pickIndex) && pickIndex < 0 && pickIndex > 4) {
-                await message.sendReply('请在1-4之间选择一个图片序号。', true);
+    public async generateImageFromPrompt(message: CommonReceivedMessage, prompt: string, refImage: string = '', relaxMode = false, options: Text2ImgRuntimeOptions = {}) {
+        this.logger.debug("收到绘图请求: " + prompt);
+        if (refImage) {
+            this.logger.debug("参考图片: " + refImage);
+        }
+
+        let paintSize: string | undefined;
+        let subjectType: string | undefined;
+        let isRaw = false;
+
+        let llmApi = this.app.getPlugin<ChatGPTController>('openai');
+
+        if (prompt.includes('--raw')) {
+            // 使用原prompt
+            prompt = prompt.replace(/--raw ?/g, '').trim();
+            subjectType = 'raw';
+            isRaw = true;
+        } else if (llmApi) {
+            // 使用ChatGPT生成Prompt
+            let refImagePrompt = '';
+            try {
+                if (refImage) {
+                    // 提取参考图上的内容
+                    let vlApiConf = llmApi.getApiConfigById('image_recognition');
+                    if (!vlApiConf) {
+                        throw new Error('未配置图片识别API');
+                    }
+
+                    const imageData = await loadMessageImage(refImage);
+                    if (!imageData) {
+                        throw new Error('获取图片内容失败');
+                    }
+
+                    let llmImageUrl = await llmApi
+                        .chatCompleteApi!.uploadDashScopeFile(imageData.content, imageData.type, vlApiConf);
+
+                    let res = await llmApi.doApiRequest([
+                        {
+                            role: 'system',
+                            content: [
+                                { text: 'You are a helpful assistant.' }
+                            ]
+                        },
+                        {
+                            role: 'user',
+                            content: [
+                                { image: llmImageUrl },
+                                { text: "请详细描述图片上的场景。如果图片中有人物，请详细描写他的发型、发色、眼睛颜色、肤色、服饰、动作。" }
+                            ],
+                        }
+                    ] as DashScopeMultiModelMessageItem[], vlApiConf);
+
+                    refImagePrompt = res.outputMessage;
+                }
+            } catch (err: any) {
+                this.logger.error("提取参考图内容失败", err);
+                console.error(err);
             }
 
+            let finalPrompt = LLM_PROMPT.replace(/\{\{\{prompt\}\}\}/g, prompt);
+            if (refImagePrompt) {
+                finalPrompt += LLM_REFIMAGE_PROMPT.replace(/\{\{\{prompt\}\}\}/g, refImagePrompt);
+            }
+
+            let messageList: any[] = [
+                { role: 'system', content: 'You are a helpful assistant.' },
+                { role: 'user', content: finalPrompt }
+            ];
+
+            let apiConf = llmApi.getApiConfigById(this.config.prompt_gen_llm_id ?? '');
+            let llmFunctions = await llmApi.getLLMFunctions();
+
+            let replyRes = await llmApi.doApiRequest(messageList, apiConf, {
+                llmFunctions,
+            });
+            if (replyRes.outputMessage) {
+                let reply = replyRes.outputMessage;
+                this.logger.debug(`ChatGPT返回: ${reply}`);
+                let matchedJson = reply.match(/\{[\s\S]*\}/);
+                if (matchedJson) {
+                    let promptRes = JSON.parse(matchedJson[0]);
+                    if (promptRes) {
+                        prompt = promptRes.prompt;
+                        paintSize = promptRes.size;
+                        subjectType = promptRes.subject;
+                        this.logger.debug(`ChatGPT生成Prompt结果: ${prompt}, 画幅: ${paintSize}, 类型: ${subjectType}`);
+                    }
+                } else {
+                    throw new UserRequestError(`生成Prompt失败: ${reply}`);
+                }
+            } else {
+                throw new UserRequestError(`生成Prompt失败: Prompt生成器返回为空`);
+            }
+        } else if (options.useTranslate) {
+            if (prompt.match(/[\u4e00-\u9fa5]/)) {
+                prompt = await this.translateCaiyunAI(prompt);
+                this.logger.debug("Prompt翻译结果: " + prompt);
+                if (!prompt) {
+                    throw new UserRequestError('尝试翻译出错，过会儿再试试吧。');
+                }
+            } else {
+                this.logger.debug("Prompt不需要翻译");
+            }
+        }
+
+        let api = this.getMostMatchedApi(prompt, subjectType);
+        // 检查是否有禁用词
+        for (let matcher of this.bannedWordsMatcher) {
+            if (prompt.match(matcher)) {
+                throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
+            }
+        }
+        for (let matcher of api._banned_words_matcher!) {
+            if (prompt.match(matcher)) {
+                throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
+            }
+        }
+
+        let mjModel = options.model ?? MJModel.MJ;
+
+        if (message.extra.cancelled || this.cancelledMessageIds.includes(message.id!)) {
+            this.logger.debug('用户取消生成图片');
+            throw new UserCancelledError();
+        }
+
+        // 增加请求计数
+        const userSessionStore = message.session.user;
+        await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
+
+        message.sendReply('安排了', true);
+
+        const promise = this.mjApi.imagine({
+            message,
+            prompt,
+            noErrorReply: !!options.noErrorReply,
+            subjectType,
+            paintSize,
+            isRaw,
+            model: mjModel,
+            relax: relaxMode,
+            refUrl: refImage,
+        });
+
+        return {
+            prompt,
+            paintSize,
+            subjectType,
+            promise,
+        };
+    }
+
+    public async upscaleImage(args: CommandInputArgs, message: CommonReceivedMessage, repliedMessage: CommonSendMessage) {
+        try {
+            let matches = args.param.trim().match(/(\d+)$/);
+            if (!matches) {
+                await message.sendReply('参考用法：“获取图片 1”', true);
+                return;
+            }
+
+            let pickIndex = parseInt(matches[1]);
+            if (isNaN(pickIndex) && pickIndex < 0 && pickIndex > 4) {
+                await message.sendReply('请在1-4之间选择一个图片序号。', true);
+                return;
+            }
+
+            if (!repliedMessage.extra.mjMsgId) {
+                await message.sendReply('未找到原始图片信息，请回复由Midjourney生成的四格图消息。', true);
+                return;
+            }
+
+            let mjModel = repliedMessage.extra.mjModel;
             const promise = this.mjApi.upscaleImage({
                 message,
                 pickIndex,
@@ -505,6 +576,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 msgId: repliedMessage.extra.mjMsgId,
                 hash: repliedMessage.extra.mjHash,
                 flags: repliedMessage.extra.mjFlags,
+                model: mjModel,
                 noErrorReply: false,
             });
 
@@ -537,29 +609,76 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
     public async variantImage(args: CommandInputArgs, message: CommonReceivedMessage, repliedMessage: CommonSendMessage) {
         try {
-            let pickIndex = parseInt(args.param);
+            let matches = args.param.trim().match(/(?<idx>\d+)(?<prompt>.*?)$/);
+            if (!matches) {
+                await message.sendReply('参考用法：“以图生图 1”', true);
+                return;
+            }
+
+            let pickIndex = parseInt(matches.groups?.idx ?? '');
             if (isNaN(pickIndex) && pickIndex < 0 && pickIndex > 4) {
                 await message.sendReply('请在1-4之间选择一个图片序号。', true);
             }
+
+            if (!repliedMessage.extra.mjMsgId) {
+                await message.sendReply('未找到原始图片信息，请回复由Midjourney生成的四格图消息。', true);
+                return;
+            }
+
+            let appendPrompt = matches.groups?.prompt ?? '';
 
             let isSponsored = await this.checkSponsoredAndRateLimit(message);
 
             // 增加请求计数
             const userSessionStore = message.session.user;
             await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
-            
+
             message.sendReply('安排了', true);
 
-            const promise = this.mjApi.variantImage({
-                message,
-                pickIndex,
-                apiId: repliedMessage.extra.mjApi,
-                msgId: repliedMessage.extra.mjMsgId,
-                hash: repliedMessage.extra.mjHash,
-                flags: repliedMessage.extra.mjFlags,
-                relax: !isSponsored,
-                noErrorReply: false,
-            });
+            let promise: Promise<void>;
+
+            if (!appendPrompt) {
+                // 简单模式
+                let mjModel = repliedMessage.extra.mjModel;
+                promise = this.mjApi.variantImage({
+                    message,
+                    pickIndex,
+                    apiId: repliedMessage.extra.mjApi,
+                    msgId: repliedMessage.extra.mjMsgId,
+                    hash: repliedMessage.extra.mjHash,
+                    flags: repliedMessage.extra.mjFlags,
+                    model: mjModel,
+                    relax: !isSponsored,
+                    noErrorReply: false,
+                });
+            } else {
+                // 补充prompt模式
+                let mjModel = repliedMessage.extra.mjModel;
+                let scaledImage = await this.mjApi.upscaleImage({
+                    message,
+                    pickIndex,
+                    apiId: repliedMessage.extra.mjApi,
+                    msgId: repliedMessage.extra.mjMsgId,
+                    hash: repliedMessage.extra.mjHash,
+                    flags: repliedMessage.extra.mjFlags,
+                    model: mjModel,
+                    noErrorReply: false,
+                    slient: true,
+                });
+
+                if (!scaledImage) {
+                    throw new Error('获取单图出错');
+                }
+
+                let imageUrl = 'base64://' + scaledImage.content.toString('base64'); // 暂时先转成base64图片，之后再优化
+
+                const result = await this.generateImageFromPrompt(message, appendPrompt, imageUrl, !isSponsored, {
+                    noErrorReply: false,
+                    model: mjModel,
+                });
+
+                promise = result.promise;
+            }
 
             return {
                 promise,

@@ -289,3 +289,13 @@ export function hyphenToCamelCase(text: string): string {
 export function camelCaseToHyphen(text: string): string {
     return text.replace(/([A-Z])/g, (match) => '-' + match.toLowerCase());
 }
+
+export function stripObject(obj: any): any {
+    let newObj: any = {};
+    for (let key in obj) {
+        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") {
+            newObj[key] = obj[key];
+        }
+    }
+    return newObj;
+}

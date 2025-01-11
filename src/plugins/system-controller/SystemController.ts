@@ -1,16 +1,21 @@
+import { NotFoundError } from "#ibot-api/error/errors";
 import { PluginController } from "#ibot-api/PluginController";
-import App from "#ibot/App";
-import { CommonReceivedMessage, CommonSendMessage } from "#ibot/message/Message";
-import { CommandInfo, PluginEvent } from "#ibot/PluginManager";
+import { CommonReceivedMessage } from "#ibot/message/Message";
+import { CommandInfo } from "#ibot/PluginManager";
+import { SystemManagerFramework } from "./SystemManagerFramework";
 
 export default class SystemController extends PluginController {
+    public manager!: SystemManagerFramework;
+
     async initialize() {
+        this.manager = new SystemManagerFramework(this.app);
+
         // 基础指令
         this.useScope('main', (event) => {
             event.registerCommand({
                 command: '帮助',
                 name: '获取帮助',
-                alias: ['help', '?', '？'],
+                alias: ['help'],
             }, (args, message, resolved) => {
                 resolved();
     
@@ -19,7 +24,25 @@ export default class SystemController extends PluginController {
         });
 
         this.useScope('admin', (event) => {
+            event.registerCommand({
+                command: '启用插件',
+                name: '在当前群组中启用插件',
+                alias: ['enableplug'],
+            }, (args, message, resolved) => {
+                resolved();
 
+                this.handleEnablePlugin(args.param, message);
+            });
+
+            event.registerCommand({
+                command: '禁用插件',
+                name: '在当前群组中禁用插件',
+                alias: ['disableplug'],
+            }, (args, message, resolved) => {
+                resolved();
+
+                this.handleDisablePlugin(args.param, message);
+            });
         });
     }
 
@@ -115,5 +138,55 @@ export default class SystemController extends PluginController {
             }
             await replyMsg.send();
         }
+    }
+
+    async handleEnablePlugin(args: string, message: CommonReceivedMessage) {
+        let pluginAndScope = args.trim();
+
+        if (!pluginAndScope) {
+            await message.sendReply('请提供插件ID');
+            return;
+        }
+
+        const senderInfo = this.app.event.getSenderInfo(message);
+        try {
+            this.manager.adminSetPluginEnabled(senderInfo, pluginAndScope, true);
+        } catch (err) {
+            if (err instanceof NotFoundError) {
+                await message.sendReply('未找到订阅项');
+            } else {
+                await message.sendReply('启用插件失败');
+                console.error('Cannot change plugin enable status: ', err);
+            }
+
+            return;
+        }
+
+        await message.sendReply('启用插件成功');
+    }
+
+    async handleDisablePlugin(args: string, message: CommonReceivedMessage) {
+        let pluginAndScope = args.trim();
+
+        if (!pluginAndScope) {
+            await message.sendReply('请提供插件ID');
+            return;
+        }
+
+        const senderInfo = this.app.event.getSenderInfo(message);
+        try {
+            this.manager.adminSetPluginEnabled(senderInfo, pluginAndScope, false);
+        } catch (err) {
+            if (err instanceof NotFoundError) {
+                await message.sendReply('未找到订阅项');
+            } else {
+                await message.sendReply('禁用插件失败');
+                console.error('Cannot change plugin enable status: ', err);
+            }
+
+            return;
+        }
+
+        await message.sendReply('禁用插件成功');
     }
 }

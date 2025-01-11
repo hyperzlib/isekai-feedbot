@@ -1,5 +1,7 @@
+import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import got from "got";
+import { asleep } from "./helpers";
 
 export function detectImageType(data: Buffer, defaultType: string = 'application/octet-stream'): string {
     if (data.length < 4) {
@@ -24,6 +26,17 @@ export function detectImageType(data: Buffer, defaultType: string = 'application
 export async function loadMessageImage(url: string, loadFormNetwork: boolean = false): Promise<{ content: Buffer, type: string } | null> {
     if (url.startsWith('file://')) {
         let imagePath = url.replace('file://', '');
+
+        // 等待图片加载
+        let startTime = Date.now();
+        const MAX_WAIT_TIME = 10000;
+        while (Date.now() - startTime < MAX_WAIT_TIME) {
+            if (existsSync(imagePath)) {
+                break;
+            }
+            await asleep(500);
+        }
+
         let imageBuffer = await readFile(imagePath);
         let imageType = detectImageType(imageBuffer) ?? 'application/octet-stream';
         return { content: imageBuffer, type: imageType };

@@ -17,7 +17,7 @@ export enum MJModel {
 
 export type QueuedTask<N extends string, T> = T & {
     type: N,
-    resolve: () => void,
+    resolve: (...args: any) => void,
     reject: (reason: any) => void,
 };
 
@@ -36,6 +36,8 @@ export type ImagineTaskInfo = {
 
 export type QueuedImagineTask = QueuedTask<'imagine', ImagineTaskInfo>;
 
+export type UpscaleTaskResponse = { content: Buffer, type: string } | undefined
+
 export type UpscaleTaskInfo = {
     message: CommonReceivedMessage,
     pickIndex: number,
@@ -44,6 +46,9 @@ export type UpscaleTaskInfo = {
     hash: string,
     flags: number,
     noErrorReply: boolean,
+    model: MJModel,
+    slient?: boolean,
+    resolve?: (res: UpscaleTaskResponse) => void,
 };
 
 export type QueuedUpscaleTask = QueuedTask<'upscale', UpscaleTaskInfo>;
@@ -56,6 +61,7 @@ export type VariantTaskInfo = {
     hash: string,
     flags: number,
     relax: boolean,
+    model: MJModel,
     noErrorReply: boolean,
 };
 
@@ -249,7 +255,7 @@ export class MidjourneyApiController {
     }
 
     public upscaleImage(task: UpscaleTaskInfo) {
-        return new Promise<void>((resolve, reject) => {
+        return new Promise<UpscaleTaskResponse>((resolve, reject) => {
             this.fastTasks.push({
                 ...task,
                 type: 'upscale',
@@ -469,6 +475,7 @@ export class MidjourneyApiController {
                     mjMsgId: imagineRes.id,
                     mjHash: imagineRes.hash,
                     mjFlags: imagineRes.flags,
+                    mjModel: currentTask.model,
                 });
             }
 
@@ -543,25 +550,31 @@ export class MidjourneyApiController {
             image = await this.compressThumb(image, 3840);
             let imgType = detectImageType(image);
 
-            await currentTask.message.sendReply([
-                {
-                    type: ['image'],
-                    text: '[图片]',
-                    data: {
-                        url: 'blob:',
-                        blob: new Blob([image], { type: imgType }),
-                    }
-                } as ImageMessage
-            ], false, {
-                isMidjourneyResult: true,
-                mjType: 'upscale',
-                mjApi: api.id,
-                mjMsgId: upscaleRes.id,
-                mjHash: upscaleRes.hash,
-                mjFlags: upscaleRes.flags,
-            });
+            if (!currentTask.slient) {
+                await currentTask.message.sendReply([
+                    {
+                        type: ['image'],
+                        text: '[图片]',
+                        data: {
+                            url: 'blob:',
+                            blob: new Blob([image], { type: imgType }),
+                        }
+                    } as ImageMessage
+                ], false, {
+                    isMidjourneyResult: true,
+                    mjType: 'upscale',
+                    mjApi: api.id,
+                    mjMsgId: upscaleRes.id,
+                    mjHash: upscaleRes.hash,
+                    mjFlags: upscaleRes.flags,
+                    mjModel: currentTask.model,
+                });
+            }
 
-            currentTask.resolve();
+            currentTask.resolve({
+                content: image,
+                type: imgType,
+            });
         } catch (e: any) {
             if (e instanceof UserRequestError) {
                 await currentTask.message.sendReply(e.message, true);
@@ -652,6 +665,7 @@ export class MidjourneyApiController {
                 mjMsgId: res.id,
                 mjHash: res.hash,
                 mjFlags: res.flags,
+                mjModel: currentTask.model,
             });
 
             currentTask.resolve();

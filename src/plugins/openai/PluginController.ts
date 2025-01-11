@@ -119,6 +119,7 @@ const defaultConfig = {
         key: '',
         preferred_site_domain: []
     },
+    flow_prompts: { } as Record<string, string>,
     rate_limit: 2,
     rate_limit_minutes: 5,
     messages: {
