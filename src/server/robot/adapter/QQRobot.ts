@@ -15,8 +15,10 @@ import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
 import { asleep, ItemLimitedList, messageChunksToXml } from "#ibot/utils";
 import { randomUUID } from "crypto";
 import path from "path";
-import { detectImageType } from "#ibot/utils/file";
+import { detectImageType, loadMessageImage } from "#ibot/utils/file";
 import { CronJob } from "cron";
+
+const DEFAULT_TIMEOUT = 30 * 1000;
 
 export type QQRobotConfig = RobotConfig & {
     userId: string;
@@ -37,6 +39,7 @@ export type QueryQueueItem = {
     resolve: (value: any) => void,
     reject: (reason?: any) => void,
     time: number,
+    timeout?: number,
     queryId: string;
     retryTimes: number;
 }
@@ -432,7 +435,6 @@ export default class QQRobot implements RobotAdapter {
     async downloadImages(messageContent: MessageChunk[]): Promise<void> {
         for (let chunk of messageContent) {
             if (chunk.type.includes('qqimage')) {
-
                 if (chunk.data.url) {
                     this.app.logger.debug(`正在下载图片：${chunk.data.url}`);
                     try {
@@ -483,7 +485,7 @@ export default class QQRobot implements RobotAdapter {
 
                         chunk.data.url = 'file://' + imgFile;
 
-                        console.log('图片已下载：' + chunk.data.url);
+                        this.app.logger.info('图片已下载：' + chunk.data.url);
                     } catch (err: any) {
                         this.app.logger.error(`下载图片失败：${chunk.data.url}`);
                         console.error(err);
@@ -492,6 +494,65 @@ export default class QQRobot implements RobotAdapter {
                         }
                     }
                 }
+            } else if (chunk.type.includes('image')) {
+                // 存储普通图片
+                let url: string = chunk.data.url;
+                if (!url) {
+                    continue;
+                }
+
+                let imgData: Uint8Array | null = null;
+                let imgType: string = '';
+
+                if (url.startsWith('blob:')) {
+                    // 存储Blob
+                    let blob = chunk.data.blob as Blob;
+                    if (!blob) {
+                        continue;
+                    }
+
+                    imgData = new Uint8Array(await blob.arrayBuffer());
+                    imgType = blob.type;
+                    
+                    delete chunk.data.blob; // 删除Blob，避免存储到数据库
+                } else {
+                    let res = await loadMessageImage(url, true);
+                    if (!res) {
+                        continue;
+                    }
+
+                    imgData = new Uint8Array(res.content);
+                    imgType = res.type;
+                }
+
+                let imgFileName = randomUUID();
+                let imgPath = path.join(this.imgCachePath, imgFileName[0], imgFileName.substring(0, 2));
+                let imgFile = path.join(imgPath, imgFileName);
+
+                if (!fs.existsSync(imgPath)) {
+                    await fs.promises.mkdir(imgPath, { recursive: true });
+                }
+
+                switch (imgType) {
+                    case 'image/jpeg':
+                        imgFile += '.jpg';
+                        break;
+                    case 'image/png':
+                        imgFile += '.png';
+                        break;
+                    case 'image/gif':
+                        imgFile += '.gif';
+                        break;
+                    case 'image/webp':
+                        imgFile += '.webp';
+                        break;
+                }
+
+                await fs.promises.writeFile(imgFile, imgData);
+
+                chunk.data.url = 'file://' + imgFile;
+
+                this.app.logger.info('图片已保存：' + chunk.data.url);
             }
         }
     }
@@ -601,7 +662,7 @@ export default class QQRobot implements RobotAdapter {
         return await this.callRobotApi('send_private_msg', {
             user_id: user,
             message: message
-        });
+        }, 120 * 1000);
     }
 
     /**
@@ -619,7 +680,7 @@ export default class QQRobot implements RobotAdapter {
         return await this.callRobotApi('send_group_msg', {
             group_id: group,
             message: message
-        });
+        }, 120 * 1000);
     }
 
     /**
@@ -651,8 +712,12 @@ export default class QQRobot implements RobotAdapter {
             }
             
             // 保存消息
+            this.app.logger.debug('[DEBUG] before beforeSaveSentMessage');
             message = await this.beforeSaveSentMessage(message);
-            this.infoProvider.saveMessage(message);
+            this.app.logger.debug('[DEBUG] after beforeSaveSentMessage');
+            this.infoProvider.saveMessage(message).catch((err) => {
+                this.app.logger.error('保存消息失败', err);
+            });
         } catch(err: any) {
             console.error(err);
         }
@@ -661,34 +726,8 @@ export default class QQRobot implements RobotAdapter {
     }
 
     async beforeSaveSentMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
-        // 将base64图片转换为文件路径
-        for (let chunk of message.content) {
-            if (chunk.type.includes('image') && (chunk.data.url?.startsWith('base64://') || chunk.data.blob)) {
-                let imgData: Buffer;
-                if (chunk.data.blob) {
-                    const imgBlob = chunk.data.blob as Blob;
-                    imgData = Buffer.from(await imgBlob.arrayBuffer());
-                } else {
-                    imgData = Buffer.from(chunk.data.url.substring(9), 'base64');
-                }
-
-                let imgFileName = randomUUID();
-
-                let imgPath = path.join(this.imgCachePath, imgFileName[0], imgFileName.substring(0, 2));
-                let imgFile = path.join(imgPath, imgFileName);
-
-                if (!fs.existsSync(imgPath)) {
-                    await fs.promises.mkdir(imgPath, { recursive: true });
-                }
-
-                let imgExt = detectImageType(imgData) ?? 'png';
-
-                await fs.promises.writeFile(imgFile + '.' + imgExt, new Uint8Array(imgData));
-                this.app.logger.debug(`发送的图片已保存：${imgFile}.${imgExt}`);
-
-                chunk.data.url = 'file://' + imgFile + '.' + imgExt;
-            }
-        }
+        // 存储发送消息中的图片
+        await this.downloadImages(message.content);
 
         return message;
     }
@@ -792,18 +831,18 @@ export default class QQRobot implements RobotAdapter {
     /**
      * 执行API调用
      */
-    callRobotApi(method: string, data: any): Promise<any> {
+    async callRobotApi(method: string, data: any, timeout?: number): Promise<any> {
         if (this.endpoint) {
-            return got.post(this.endpoint + '/' + method, {
+            return await got.post(this.endpoint + '/' + method, {
                 json: data,
-                timeout: 10000
+                timeout: timeout ?? DEFAULT_TIMEOUT,
             }).json<any>();
         } else {
-            return this.doSocketQuery(method, data);
+            return await this.doSocketQuery(method, data, timeout);
         }
     }
 
-    async doSocketQuery(method: string, data: any): Promise<any> {
+    async doSocketQuery(method: string, data: any, timeout?: number): Promise<any> {
         return new Promise((resolve, reject) => {
             let queryId = randomUUID();
             this.socketQueryQueue.push({
@@ -813,6 +852,7 @@ export default class QQRobot implements RobotAdapter {
                 reject,
                 queryId,
                 time: Date.now(),
+                timeout,
                 retryTimes: 0,
             });
 
@@ -874,7 +914,8 @@ export default class QQRobot implements RobotAdapter {
     cleanSocketQueryQueue() {
         let currentTime = Date.now();
         this.socketQueryQueue = this.socketQueryQueue.filter((item) => {
-            if (currentTime - item.time > 30000) {
+            let timeout = item.timeout ?? DEFAULT_TIMEOUT;
+            if (currentTime - item.time > timeout) {
                 item.reject(new Error('Socket Query Timeout'));
                 return false;
             }
@@ -883,7 +924,8 @@ export default class QQRobot implements RobotAdapter {
 
         for (let key in this.socketResponseQueue) {
             let item = this.socketResponseQueue[key];
-            if (currentTime - item.time > 30000) {
+            let timeout = item.timeout ?? DEFAULT_TIMEOUT;
+            if (currentTime - item.time > timeout) {
                 item.reject(new Error('Socket Query Timeout'));
                 delete this.socketResponseQueue[key];
             }

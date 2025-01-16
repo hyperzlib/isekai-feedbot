@@ -57,7 +57,7 @@ export default class PublicAssetsController extends PluginController<typeof defa
      * 创建临时资源
      * @param fileContent 文件内容
      * @param fileMetaData 文件Meta信息
-     * @param expireTime 过期时间
+     * @param expireTime 过期时间（秒）
      * @returns 
      */
     public async createAsset(fileContent: Buffer, fileMetaData?: FileMetaData, expireTime: number = 5 * 60): Promise<{ fileId: string, url: string }> {

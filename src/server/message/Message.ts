@@ -329,7 +329,17 @@ export class CommonReceivedMessage extends CommonMessage {
             }
 
             if (!target[p]) {
-                target[p] = this.getSession(p as string);
+                try {
+                    target[p] = this.getSession(p as string);
+                } catch (err: any) {
+                    const errMsg = err?.message ?? '';
+                    if (errMsg.startsWith('Unknown sender') || errMsg.startsWith('Unknown session type')) {
+                        return undefined;
+                    }
+
+                    console.error(err);
+                    return undefined;
+                }
             }
             return target[p];
         },
@@ -424,7 +434,7 @@ export class CommonReceivedMessage extends CommonMessage {
         return {
             messageId: this.id!,
             type: this.type,
-            direction: MessageDirection.SEND,
+            direction: MessageDirection.RECEIVE,
             chatType: this.chatType,
             chatIdentity: chatIdentityToDB(chatIdentity),
             repliedMessageId: this.repliedId,

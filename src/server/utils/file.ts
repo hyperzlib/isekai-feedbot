@@ -2,6 +2,8 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import got from "got";
 import { asleep } from "./helpers";
+import App from "#ibot/App";
+import { randomUUID } from "crypto";
 
 export function detectImageType(data: Buffer, defaultType: string = 'application/octet-stream'): string {
     if (data.length < 4) {
@@ -54,4 +56,13 @@ export async function loadMessageImage(url: string, loadFormNetwork: boolean = f
     }
 
     return null;
+}
+
+export type CacheFileExpires = 'minutely' | 'hourly' | 'daily' | 'weekly';
+
+export async function createTempCachePath(app: App, fileExt: string, cacheExpireTime: CacheFileExpires = 'hourly') {
+    let fileName = randomUUID();
+    let tmpPath = await app.initPath('cache', 'temp', cacheExpireTime, fileName[0], fileName.substring(0, 2));
+    let filePath = `${tmpPath}/${fileName}.${fileExt}`;
+    return filePath;
 }

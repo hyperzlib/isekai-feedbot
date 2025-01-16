@@ -614,6 +614,35 @@ export class ChatCompleteApi {
                     outputMessage: completions,
                     totalTokens: completion_tokens,
                 };
+            } else if (Array.isArray(firstChoice.message?.content)) { // 新版API
+                const content: any[] = firstChoice.message?.content;
+                let completions = '';
+                for (let item of content) {
+                    if (item.text) {
+                        completions += item.text;
+                    }
+                }
+
+                let completion_tokens: number = res.usage?.completion_tokens ?? gptEncode(completions).length;
+
+                completions = completions.replace(/(^\n+|\n+$)/g, '');
+
+                messageList = [
+                    ...messageList,
+                    {
+                        role: 'assistant',
+                        content: [
+                            { text: completions }
+                        ],
+                        tokens: completion_tokens,
+                    }
+                ];
+
+                return {
+                    messageList: messageList,
+                    outputMessage: completions,
+                    totalTokens: completion_tokens,
+                };
             }
         }
         throw new ChatGPTAPIError('API请求失败。', 'api_request_failed');

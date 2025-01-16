@@ -1,5 +1,7 @@
 import { PluginController } from "#ibot-api/PluginController";
 import { CommonReceivedMessage, CommonSendMessage } from "#ibot/message/Message";
+import Handlebars from "handlebars";
+import * as fs from 'fs';
 import got from "got/dist/source";
 import ChatGPTController from "../openai/PluginController";
 import { UserCancelledError, UserRequestError } from "#ibot-api/error/errors";
@@ -35,23 +37,72 @@ export type Text2ImgRuntimeOptions = {
     useTranslate?: boolean,
     model?: MJModel,
     noErrorReply?: boolean,
+    refPrompt?: string,
 };
 
-const LLM_PROMPT: string = "Please generate the Midjourney prompt according to the following requirements. The output format is:\n" +
-    '```{"prompt": "[prompt content]", "size": "Must be one of (portrait|landscape|avatar)", "subject": "Must be one of (boy|girl|item|landscape|animal)"}```.\n' +
-    'The prompt should in simple English. You just need to output json. You need to describe the scene in detail.\n' +
-    'If there are multiple unrelated objects in a picture, please add double colons (::) between their prompt words to separate them. For example: Input: ```space ship```, the Midjourney will produces images of sci-fi spaceships. Input: ```space:: ship```, the Midjourney will produces images of a sailing ship traveling through space.\n'
-'\n' +
-    'Here are some formula for a Midjourney image prompt:\n' +
-    ' - For characters: An image of [adjective] [subject] with [clothing, earring and accessories] [doing action]\n' +
-    ' - For landscapes and items: An image of [subject] with [some creative details]\n' +
-    '\n' +
-    '## User input:\n' +
-    '{{{prompt}}}';
+export class MidjourneyContentFilterError extends UserRequestError {
+    constructor(message: string) {
+        super(message);
+        this.name = 'MidjourneyContentFilterError';
+    }
+}
 
-const LLM_REFIMAGE_PROMPT = '\n\n' +
-    '## User provided reference image:\n' +
-    'Recognized image content: {{{prompt}}}';
+export type ImageRefScope = 'character' | 'full_scene' | 'style' | 'prompt_only';
+
+const LLM_PROMPT = `Please generate the Midjourney prompt according to the following requirements.
+
+## Output Format:
+Output should be a JSON object with the following fields:
+
+### prompt:
+The prompt should in simple English. You just need to output json. You need to describe the scene in detail.
+
+Here are some formula for a Midjourney image prompt:
+ - For characters: an image of [adjective] [subject] with [clothing, earring and accessories] [doing action]
+ - For landscapes, items and animals: an image of [subject] with [some creative details]
+
+### size:
+ - portrait: A portrait image. For example, vertical screen pictures taken by mobile phone.
+ - landscape: A horizontal picture.
+ - avatar: A square image, usually used as a profile picture.
+
+### subject: 
+ - character: Image mainly showing characters.
+ - item: Image mainly showing items.
+ - landscape: Image mainly showing landscapes.
+ - animal: Image mainly showing animals or fantasy creatures.
+{{#if image_prompt}}
+### reference_scope:
+ - character: Generate an image that contains main character of the reference image. Usually use this option. If User just wants to modify something on the reference image, don't use this option.
+ - full_scene: Generate an image that is compositionally similar to a reference image. Only used when there are no characters in the reference image, or user wants to modify something.
+ - style: Generate an image that has same style as the reference image.
+{{/if}}
+
+## Output example:
+{{#if image_prompt}}
+\`\`\`{"prompt": "an image of ...", "size": "landscape", "subject": "character", "reference_scope": "main_part"}\`\`\`.
+{{else}}
+\`\`\`{"prompt": "an image of ...", "size": "landscape", "subject": "character"}\`\`\`.
+{{/if}}
+
+## Error output format:
+If the user prompt contains content related to real-world politics or pornography, stop generating it and return a error message.
+However, fictional political plots that not related with real politicians are allowed. (e.g. fantasy medieval, DND, science fiction)
+
+Format: \`\`\`{"error": {"code": "content_filter", "message": "The prompt contains inappropriate content."}}\`\`\`.
+
+{{#if image_prompt}}
+## User provided reference image:
+{{#if old_prompt}}
+prompt used when generating reference image: {{{old_prompt}}}
+{{/if}}
+Recognized image content: {{{image_prompt}}}
+{{/if}}
+
+## User input:
+{{{prompt}}}`;
+
+const buildLLMPrompt = Handlebars.compile(LLM_PROMPT);
 
 const defaultConfig = {
     api: [] as ApiConfig[],
@@ -125,7 +176,8 @@ export default class MidjourneyController extends PluginController<typeof defaul
             }
 
             const repliedMessage = await message.getRepliedMessage();
-            if (!repliedMessage?.extra.isMidjourneyResult && repliedMessage?.extra.mjType !== 'imagine') {
+            if (!repliedMessage) {
+                await message.sendReply('未找到原始图片信息，请回复由Midjourney生成的四格图消息。', true);
                 return;
             }
 
@@ -144,7 +196,8 @@ export default class MidjourneyController extends PluginController<typeof defaul
             }
 
             const repliedMessage = await message.getRepliedMessage();
-            if (!repliedMessage?.extra.isMidjourneyResult && repliedMessage?.extra.mjType !== 'imagine') {
+            if (!repliedMessage) {
+                await message.sendReply('未找到原始图片信息，请回复由Midjourney生成的四格图消息。', true);
                 return;
             }
 
@@ -374,7 +427,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 if (options.noErrorReply) {
                     throw new UserRequestError(`连接失败: ${err.message}`);
                 } else {
-                    await message.sendReply(`连接失败: ${err.message}，过会儿再试试呗。`, true);
+                    await message.sendReply(`绘图失败: ${err.message}，过会儿再试试呗。`, true);
                     return;
                 }
             } else if (err.name === 'ChatGPTAPIError') {
@@ -387,6 +440,13 @@ export default class MidjourneyController extends PluginController<typeof defaul
                             return;
                         }
                     }
+                }
+            } else if (err instanceof MidjourneyContentFilterError) {
+                if (options.noErrorReply) {
+                    throw new UserRequestError(err.message);
+                } else {
+                    await message.sendReply('逆天', true);
+                    return;
                 }
             }
 
@@ -406,6 +466,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
         let paintSize: string | undefined;
         let subjectType: string | undefined;
+        let refScope: ImageRefScope | undefined;
         let isRaw = false;
 
         let llmApi = this.app.getPlugin<ChatGPTController>('openai');
@@ -456,11 +517,16 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 this.logger.error("提取参考图内容失败", err);
                 console.error(err);
             }
+            
+            let llmPromptArgs: any = {
+                prompt,
+                image_prompt: refImagePrompt,
+                old_prompt: options.refPrompt ?? '',
+            };
 
-            let finalPrompt = LLM_PROMPT.replace(/\{\{\{prompt\}\}\}/g, prompt);
-            if (refImagePrompt) {
-                finalPrompt += LLM_REFIMAGE_PROMPT.replace(/\{\{\{prompt\}\}\}/g, refImagePrompt);
-            }
+            let finalPrompt = buildLLMPrompt(llmPromptArgs);
+
+            this.logger.debug('Generate image prompt via LLM:\n' + finalPrompt);
 
             let messageList: any[] = [
                 { role: 'system', content: 'You are a helpful assistant.' },
@@ -479,12 +545,24 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 let matchedJson = reply.match(/\{[\s\S]*\}/);
                 if (matchedJson) {
                     let promptRes = JSON.parse(matchedJson[0]);
-                    if (promptRes) {
-                        prompt = promptRes.prompt;
-                        paintSize = promptRes.size;
-                        subjectType = promptRes.subject;
-                        this.logger.debug(`ChatGPT生成Prompt结果: ${prompt}, 画幅: ${paintSize}, 类型: ${subjectType}`);
+                    if (!promptRes) {
+                        throw new UserRequestError(`生成Prompt失败: ${reply}`);
                     }
+
+                    if (promptRes.error) {
+                        if (promptRes.error.code === 'content_filter') {
+                            throw new MidjourneyContentFilterError('包含不适当的内容。');
+                        } else {
+                            throw new UserRequestError(`生成Prompt失败: ${promptRes.error.message}`);
+                        }
+                    }
+
+                    prompt = promptRes.prompt;
+                    paintSize = promptRes.size;
+                    subjectType = promptRes.subject;
+                    refScope = promptRes.reference_scope;
+
+                    this.logger.debug(`ChatGPT生成Prompt结果: ${prompt}, 画幅: ${paintSize}, 类型: ${subjectType}`);
                 } else {
                     throw new UserRequestError(`生成Prompt失败: ${reply}`);
                 }
@@ -507,12 +585,12 @@ export default class MidjourneyController extends PluginController<typeof defaul
         // 检查是否有禁用词
         for (let matcher of this.bannedWordsMatcher) {
             if (prompt.match(matcher)) {
-                throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
+                throw new MidjourneyContentFilterError(`生成图片失败：关键词中包含禁止的内容。`);
             }
         }
         for (let matcher of api._banned_words_matcher!) {
             if (prompt.match(matcher)) {
-                throw new UserRequestError(`生成图片失败：关键词中包含禁止的内容。`);
+                throw new MidjourneyContentFilterError(`生成图片失败：关键词中包含禁止的内容。`);
             }
         }
 
@@ -539,6 +617,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
             model: mjModel,
             relax: relaxMode,
             refUrl: refImage,
+            refScope,
         });
 
         return {
@@ -563,7 +642,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 return;
             }
 
-            if (!repliedMessage.extra.mjMsgId) {
+            if (!repliedMessage.extra.isMidjourneyResult) {
                 await message.sendReply('未找到原始图片信息，请回复由Midjourney生成的四格图消息。', true);
                 return;
             }
@@ -572,6 +651,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
             const promise = this.mjApi.upscaleImage({
                 message,
                 pickIndex,
+                oldPrompt: repliedMessage.extra.prompt,
                 apiId: repliedMessage.extra.mjApi,
                 msgId: repliedMessage.extra.mjMsgId,
                 hash: repliedMessage.extra.mjHash,
@@ -609,6 +689,9 @@ export default class MidjourneyController extends PluginController<typeof defaul
 
     public async variantImage(args: CommandInputArgs, message: CommonReceivedMessage, repliedMessage: CommonSendMessage) {
         try {
+            this.logger.info('Variant msg: ' + JSON.stringify(repliedMessage.content));
+            console.log(repliedMessage.extra);
+
             let matches = args.param.trim().match(/(?<idx>\d+)(?<prompt>.*?)$/);
             if (!matches) {
                 await message.sendReply('参考用法：“以图生图 1”', true);
@@ -620,7 +703,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 await message.sendReply('请在1-4之间选择一个图片序号。', true);
             }
 
-            if (!repliedMessage.extra.mjMsgId) {
+            if (!repliedMessage.extra.isMidjourneyResult) {
                 await message.sendReply('未找到原始图片信息，请回复由Midjourney生成的四格图消息。', true);
                 return;
             }
@@ -633,16 +716,16 @@ export default class MidjourneyController extends PluginController<typeof defaul
             const userSessionStore = message.session.user;
             await userSessionStore.addRequestCount(this.SESSION_KEY_GENERATE_COUNT, this.config.rate_limit_minutes * 60);
 
-            message.sendReply('安排了', true);
-
             let promise: Promise<void>;
 
             if (!appendPrompt) {
                 // 简单模式
+                message.sendReply('安排了', true);
                 let mjModel = repliedMessage.extra.mjModel;
                 promise = this.mjApi.variantImage({
                     message,
                     pickIndex,
+                    oldPrompt: repliedMessage.extra.prompt,
                     apiId: repliedMessage.extra.mjApi,
                     msgId: repliedMessage.extra.mjMsgId,
                     hash: repliedMessage.extra.mjHash,
@@ -653,28 +736,32 @@ export default class MidjourneyController extends PluginController<typeof defaul
                 });
             } else {
                 // 补充prompt模式
+                appendPrompt = appendPrompt.replace(/^( |，|。|,|\.|!|！)+/, '');
                 let mjModel = repliedMessage.extra.mjModel;
-                let scaledImage = await this.mjApi.upscaleImage({
-                    message,
-                    pickIndex,
-                    apiId: repliedMessage.extra.mjApi,
-                    msgId: repliedMessage.extra.mjMsgId,
-                    hash: repliedMessage.extra.mjHash,
-                    flags: repliedMessage.extra.mjFlags,
-                    model: mjModel,
-                    noErrorReply: false,
-                    slient: true,
-                });
-
-                if (!scaledImage) {
-                    throw new Error('获取单图出错');
+                let generatedImageUrl: string = '';
+                for (const chunk of repliedMessage.content) {
+                    if (chunk.type.includes('image')) {
+                        generatedImageUrl = chunk.data.url;
+                        break;
+                    }
                 }
 
-                let imageUrl = 'base64://' + scaledImage.content.toString('base64'); // 暂时先转成base64图片，之后再优化
+                let generatedImageData = await loadMessageImage(generatedImageUrl);
+                if (!generatedImageData) {
+                    throw new Error('加载生成的图片文件出错');
+                }
+
+                // 切分四格图片
+                let imageData = await this.mjApi.extractFromCombinedImage(generatedImageData.content, pickIndex);
+
+                let tmpImageFile = await this.app.createTempCachePath('jpg');
+                await fs.promises.writeFile(tmpImageFile, new Uint8Array(imageData));
+                let imageUrl = 'file://' + tmpImageFile;
 
                 const result = await this.generateImageFromPrompt(message, appendPrompt, imageUrl, !isSponsored, {
                     noErrorReply: false,
                     model: mjModel,
+                    refPrompt: repliedMessage.extra.prompt ?? '',
                 });
 
                 promise = result.promise;

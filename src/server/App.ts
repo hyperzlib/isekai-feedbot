@@ -20,6 +20,7 @@ import * as Utils from './utils';
 import { RoleManager } from './RoleManager';
 import { CommonSendMessage, MessageChunk } from './message/Message';
 import { ChatIdentity } from './message/Sender';
+import { CacheFileExpires, createTempCachePath } from './utils/file';
 
 export * from './utils/contextHooks';
 
@@ -221,5 +222,9 @@ export default class App {
         }
 
         return fullPath;
+    }
+
+    public async createTempCachePath(fileExt: string, cacheExpireTime: CacheFileExpires = 'hourly') {
+        return await createTempCachePath(this, fileExt, cacheExpireTime);
     }
 }

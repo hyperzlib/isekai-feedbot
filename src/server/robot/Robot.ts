@@ -208,6 +208,8 @@ export class Robot<Adapter extends RobotAdapter = any> {
                         };
                     }) ?? [];
                     message.time = dbMessage.time;
+
+                    parsedMessage = message;
                 }
             } else if (dbMessage.direction === MessageDirection.SEND) {
                 let message = new CommonSendMessage(this, dbMessage.chatType, chatIdentity, dbMessage.content);

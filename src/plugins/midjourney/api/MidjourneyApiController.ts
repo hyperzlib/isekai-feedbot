@@ -1,5 +1,5 @@
 import App from "#ibot/App";
-import MidjourneyController, { ApiConfig } from "../PluginController";
+import MidjourneyController, { ApiConfig, ImageRefScope } from "../PluginController";
 import { Logger, withTimeout } from "#ibot/utils";
 import { FetchFn, Midjourney, MJBot, MJConfigParam, MJMessage, NijiBot } from "midjourney";
 import { HttpsProxyAgent } from "hpagent";
@@ -29,6 +29,7 @@ export type ImagineTaskInfo = {
     subjectType?: string,
     paintSize?: string,
     refUrl?: string,
+    refScope?: ImageRefScope,
     model: MJModel,
     relax: boolean,
     cancelled?: boolean,
@@ -40,6 +41,7 @@ export type UpscaleTaskResponse = { content: Buffer, type: string } | undefined
 
 export type UpscaleTaskInfo = {
     message: CommonReceivedMessage,
+    oldPrompt: string,
     pickIndex: number,
     apiId: string,
     msgId: string,
@@ -55,6 +57,7 @@ export type QueuedUpscaleTask = QueuedTask<'upscale', UpscaleTaskInfo>;
 
 export type VariantTaskInfo = {
     message: CommonReceivedMessage,
+    oldPrompt: string,
     pickIndex: number,
     apiId: string,
     msgId: string,
@@ -354,6 +357,113 @@ export class MidjourneyApiController {
         }
     }
 
+    public async extractFromCombinedImage(image: Buffer, index: number) {
+        try {
+            const sharp = await import('sharp');
+            let imgObj = sharp.default(image);
+
+            let metadata = await imgObj.metadata();
+            let imgWidth = metadata.width;
+            let imgHeight = metadata.height;
+
+            if (!imgWidth || !imgHeight) {
+                throw new Error('无法获取图片大小');
+            }
+
+            let targetWidth = Math.floor(imgWidth / 2);
+            let targetHeight = Math.floor(imgHeight / 2);
+
+            let x = 0, y = 0;
+
+            switch (index) {
+                case 1:
+                    x = 0;
+                    y = 0;
+                    break;
+                case 2:
+                    x = targetWidth;
+                    y = 0;
+                    break;
+                case 3:
+                    x = 0;
+                    y = targetHeight;
+                    break;
+                case 4:
+                    x = targetWidth;
+                    y = targetHeight;
+                    break;
+            }
+
+            const thumb = await imgObj.extract({
+                left: x,
+                top: y,
+                width: targetWidth,
+                height: targetHeight,
+            }).jpeg({ quality: 80 }).toBuffer();
+
+            return thumb;
+        } catch (err: any) {
+            if (err.code === 'MODULE_NOT_FOUND') {
+                this.logger.warn("未安装sharp模块，跳过压缩图片。");
+                return image;
+            }
+
+            throw err;
+        }
+    }
+
+    /**
+     * 将参考图片转换为对应宽高比，并压缩
+     * @param image 
+     * @param aspectRatio 
+     */
+    public async makeReferenceImage(image: Buffer, aspectRatio: [number, number], maxSize: number = 1920) {
+        if (aspectRatio[0] === 0 || aspectRatio[1] === 0) {
+            throw new Error('无效的宽高比');
+        }
+
+        try {
+            const sharp = await import('sharp');
+
+            let outputWidth = 0;
+            let outputHeight = 0;
+            
+            let srcImg = sharp.default(image);
+            let metadata = await srcImg.metadata();
+
+            if (!metadata.width || !metadata.height) {
+                throw new Error('无法获取参考图片大小，可能是格式不支持');
+            }
+
+            if (metadata.width > metadata.height) {
+                outputWidth = Math.min(metadata.width, maxSize);
+                outputHeight = Math.round(outputWidth * aspectRatio[1] / aspectRatio[0]);
+            } else {
+                outputHeight = Math.min(metadata.height, maxSize);
+                outputWidth = Math.round(outputHeight * aspectRatio[0] / aspectRatio[1]);
+            }
+            
+            let dstImg = await srcImg.resize({
+                    width: outputWidth,
+                    height: outputHeight,
+                    fit: 'contain',
+                    background: { r: 0, g: 0, b: 0, alpha: 1 },
+                })
+                .jpeg({ quality: 80 })
+                .toBuffer();
+
+            return dstImg;
+        } catch (err: any) {
+            if (err.code === 'MODULE_NOT_FOUND') {
+                this.logger.warn("未安装sharp模块，跳过预处理图片。");
+                return image;
+            }
+
+            throw err;
+        }
+    }
+        
+
     public async handleImagineTask(currentTask: QueuedImagineTask) {
         if (currentTask.cancelled) {
             currentTask.resolve();
@@ -365,7 +475,31 @@ export class MidjourneyApiController {
         let api = this.mainController.getMostMatchedApi(currentTask.prompt, currentTask.subjectType);
         this.logger.debug("使用API: " + api.id);
 
-        let prompt = currentTask.prompt;
+        let params: string[] = [currentTask.prompt];
+
+        // 附加参数
+        if (!currentTask.isRaw) {
+            // 自动选择尺寸
+            let size = this.mainController.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
+            this.logger.debug("使用尺寸: " + size.ratio);
+            params.push(`--ar ${size.ratio}`);
+        }
+
+        if (currentTask.model === MJModel.Niji) {
+            params.push('--niji 6');
+        }
+
+        if (currentTask.relax) {
+            params.push('--relax');
+        }
+
+        let promptWithoutUrl = params.join(' ');
+
+        let ratio: [number, number] = [1, 1];
+        let matchesRatio = promptWithoutUrl.match(/--ar (?<width>\d+):(?<height>\d+)/);
+        if (matchesRatio) {
+            ratio = [parseInt(matchesRatio.groups!.width), parseInt(matchesRatio.groups!.height)];
+        }
 
         if (currentTask.refUrl && !currentTask.refUrl.startsWith('http')) {
             let imageData = await loadMessageImage(currentTask.refUrl);
@@ -378,36 +512,37 @@ export class MidjourneyApiController {
                 throw new UserRequestError('无法上传图片，需要安装PublicAssets插件。');
             }
 
-            let imageAsset = await assets.createAsset(imageData.content, { mimeType: imageData.type });
+            // 缩放和压缩图片
+            let imageBuffer = await this.makeReferenceImage(imageData.content, ratio);
+
+            let imageAsset = await assets.createAsset(imageBuffer, { mimeType: imageData.type }, 3600);
             currentTask.refUrl = imageAsset.url;
         }
 
-        // 附加参数
-        let params: string[] = []
-        if (!currentTask.isRaw) {
-            // 自动选择尺寸
-            let size = this.mainController.getMostMatchedSize(currentTask.prompt, currentTask.paintSize);
-            this.logger.debug("使用尺寸: " + size.ratio);
-            params.push(`--ar ${size.ratio}`);
-        }
-
-        if (currentTask.model === MJModel.Niji) {
-            params.push('--niji 5');
-        }
-
-        if (currentTask.relax) {
-            params.push('--relax');
-        }
-
-        this.logger.debug("开始生成图片: " + currentTask.prompt);
-
-        prompt += ' ' + params.join(' ');
-
-        let promptWithoutUrl = prompt;
-
         if (currentTask.refUrl) {
-            prompt = currentTask.refUrl + ' ' + prompt;
+            switch (currentTask.refScope) {
+                case 'character':
+                    // if (currentTask.model === MJModel.Niji) {
+                    //     // cref不支持Niji，去除niji参数
+                    //     params = params.filter(p => !p.startsWith('--niji'));
+                    //     params.unshift('Anime style,'); // 使用Anime style代替niji
+                    // }
+                    params.push(`--cref ${currentTask.refUrl}`);
+                    break;
+                case 'style':
+                    params.push(`--sref ${currentTask.refUrl}`);
+                    break;
+                case 'full_scene':
+                    params.unshift(currentTask.refUrl);
+                    break;
+                case 'prompt_only':
+                    // 仅使用参考图片的描述
+                    break;
+            }
         }
+
+        let prompt = params.join(' ');
+        this.logger.debug("开始生成图片: " + prompt);
 
         try {
             client = await this.getClient(api);
@@ -562,6 +697,7 @@ export class MidjourneyApiController {
                     } as ImageMessage
                 ], false, {
                     isMidjourneyResult: true,
+                    prompt: currentTask.oldPrompt,
                     mjType: 'upscale',
                     mjApi: api.id,
                     mjMsgId: upscaleRes.id,
@@ -607,7 +743,7 @@ export class MidjourneyApiController {
             try {
                 let noticeSent = false;
 
-                let timeoutMinutes = currentTask.relax ? 12 : 6; // Relax任务12分钟，Fast任务5分钟
+                let timeoutMinutes = currentTask.relax ? 5 : 5;
 
                 res = await withTimeout(timeoutMinutes * 60 * 1000, client!.Variation({
                     index: currentTask.pickIndex as any,
@@ -660,6 +796,7 @@ export class MidjourneyApiController {
                 } as ImageMessage
             ], false, {
                 isMidjourneyResult: true,
+                prompt: currentTask.oldPrompt,
                 mjType: 'variant',
                 mjApi: api.id,
                 mjMsgId: res.id,

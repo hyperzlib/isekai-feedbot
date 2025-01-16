@@ -328,7 +328,6 @@ export async function convertMessageToQQChunk(message: CommonSendMessage) {
                 const imageBlob = chunk.data.blob as Blob;
                 const imageBuffer = Buffer.from(await imageBlob.arrayBuffer());
                 url = 'base64://' + imageBuffer.toString('base64');
-                delete chunk.data.blob;
             }
 
             msgChunk.push({
