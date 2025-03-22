@@ -553,7 +553,9 @@ export class MidjourneyApiController {
             let noticeSent = false;
 
             try {
-                let timeoutMinutes = currentTask.relax ? 12 : 8; // Relax任务12分钟，Fast任务5分钟
+                let timeoutMinutes = currentTask.relax ?
+                    this.mainController.config.relax_queue_timeout_minutes :
+                    this.mainController.config.fast_queue_timeout_minutes;
 
                 imagineRes = await withTimeout(timeoutMinutes * 60 * 1000, client.Imagine(
                     prompt,
@@ -742,8 +744,10 @@ export class MidjourneyApiController {
 
             try {
                 let noticeSent = false;
-
-                let timeoutMinutes = currentTask.relax ? 5 : 5;
+                
+                let timeoutMinutes = currentTask.relax ?
+                    this.mainController.config.relax_queue_timeout_minutes :
+                    this.mainController.config.fast_queue_timeout_minutes;
 
                 res = await withTimeout(timeoutMinutes * 60 * 1000, client!.Variation({
                     index: currentTask.pickIndex as any,

@@ -18,6 +18,7 @@ export interface RobotAdapter {
     markRead?(message: CommonReceivedMessage): Promise<boolean>;
     sendTyping?(chatIdentity: ChatIdentity, typing: boolean): Promise<boolean>;
     sendMessage(message: CommonSendMessage): Promise<CommonSendMessage>;
+    getMessageFromRecord?(messageId: string): Promise<CommonSendMessage | CommonReceivedMessage | null>;
     deleteMessage?(chatIdentity: ChatIdentity, messageId: string): Promise<boolean>;
     retrieveMediaUrl?(mediaMessageChunk: MessageChunk): Promise<void>;
 
@@ -120,6 +121,13 @@ export class Robot<Adapter extends RobotAdapter = any> {
      */
     public sendMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
         return this.adapter.sendMessage ? this.adapter.sendMessage(message) : Promise.resolve(message);
+    }
+
+    /**
+     * 从消息记录种获取消息
+     */
+    public getMessageFromRecord(messageId: string): Promise<CommonSendMessage | CommonReceivedMessage | null> {
+        return this.adapter.getMessageFromRecord ? this.adapter.getMessageFromRecord(messageId) : Promise.resolve(null);
     }
 
     /**

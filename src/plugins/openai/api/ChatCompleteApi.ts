@@ -80,6 +80,10 @@ export class ChatCompleteApi {
             apiConf = this.mainController.getApiConfigById(characterConf.api);
         }
 
+        if (apiConf.disable_function_call) {
+            options.llmFunctions = undefined;
+        }
+
         options = {
             ...defaultRequestChatCompleteOptions,
             ...options

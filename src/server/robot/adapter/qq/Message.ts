@@ -11,7 +11,9 @@ import {
     MessageChunk,
     TextMessage,
     RecordMessage,
-    VideoMessage
+    VideoMessage,
+    CommonMessage,
+    MessageDirection
 } from "../../../message/Message";
 import { GroupSender, UserSender } from "../../../message/Sender";
 import QQRobot, { QQGroupInfo } from "../QQRobot";
@@ -104,7 +106,7 @@ export class QQGroupSender extends GroupSender {
  * @param message 
  * @returns 
  */
-export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], message: CommonReceivedMessage): Promise<CommonReceivedMessage> {
+export async function parseQQMessageChunk<T extends CommonMessage>(bot: QQRobot, messageData: any[], message: T): Promise<T> {
     let willIgnoreMention = false;
     messageData.forEach((chunkData) => {
         if (chunkData.type) {
@@ -179,8 +181,8 @@ export async function parseQQMessageChunk(bot: QQRobot, messageData: any[], mess
                 case 'at':
                     if (chunkData.data?.qq) {
                         if (!willIgnoreMention) {
-                            if (chunkData.data.qq == bot.userId) { // 如果是@机器人
-                                message.mentionedReceiver = true;
+                            if (chunkData.data.qq == bot.userId && message.direction === MessageDirection.RECEIVE) { // 如果是@机器人（仅收到消息触发）
+                                (message as unknown as QQGroupMessage).mentionedReceiver = true;
                             } else { // @其他人的情况
                                 if (chunkData.data?.qq === 'all' || chunkData.data?.qq === '0') {
                                     message.content.push({

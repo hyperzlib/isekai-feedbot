@@ -7,12 +7,12 @@ import App from "../../App";
 import { Robot, RobotAdapter } from "../Robot";
 import { FullRestfulContext, RestfulRouter, RestfulWsRouter } from "../../RestfulApiManager";
 import { convertMessageToQQChunk, parseQQMessageChunk, QQAttachmentMessage, QQGroupMessage, QQGroupSender, QQPrivateMessage, QQUserSender } from "./qq/Message";
-import { CommonReceivedMessage, CommonSendMessage, ImageMessage, MessageChunk } from "../../message/Message";
+import { CommonMessage, CommonReceivedMessage, CommonSendMessage, ImageMessage, MessageChunk, MessageDirection } from "../../message/Message";
 import { RobotConfig } from "../../types/config";
 import { ChatIdentity } from "../../message/Sender";
 import { QQInfoProvider } from "./qq/InfoProvider";
 import { CommandInfo, SubscribedPluginInfo } from "#ibot/PluginManager";
-import { asleep, ItemLimitedList, messageChunksToXml } from "#ibot/utils";
+import { asleep, ItemLimitedList, messageChunksToXml, Reactive } from "#ibot/utils";
 import { randomUUID } from "crypto";
 import path from "path";
 import { detectImageType, loadMessageImage } from "#ibot/utils/file";
@@ -152,9 +152,10 @@ export default class QQRobot implements RobotAdapter {
                     
                     if (message.post_type === 'meta_event') {
                         if (message.meta_event_type === 'heartbeat') {
-                            ctx.websocket.send(JSON.stringify({
-                                ping: true,
-                            }));
+                            // NapCat不支持
+                            // ctx.websocket.send(JSON.stringify({
+                            //     ping: true,
+                            // }));
                         } else if (message.meta_event_type === 'lifecycle' && message.sub_type === 'connect') {
                             if (message.status?.self?.user_id && message.status.self.user_id !== parseInt(this.userId)) {
                                 return;
@@ -191,6 +192,16 @@ export default class QQRobot implements RobotAdapter {
                                     case 'group_recall':
                                         this.handleDeleteMessage(message.message_id.toString());
                                         break;
+                                    default:
+                                        if (this.app.debug) {
+                                            console.log('[QQRobot] 收到其他事件', message);
+                                        }
+                                        break;
+                                }
+                                break;
+                            default:
+                                if (this.app.debug) {
+                                    console.log('[QQRobot] 收到其他事件', message);
                                 }
                                 break;
                         }
@@ -290,6 +301,44 @@ export default class QQRobot implements RobotAdapter {
         }];
     }
 
+    async parseQQMessageData(data: any) {
+        let message: QQGroupMessage | QQPrivateMessage | CommonSendMessage | undefined;
+        let senderId = data.sender?.user_id.toString();
+        if (data.message_type === 'group') {
+            // 处理群消息
+            let groupInfo = this.infoProvider.groupList.find((info) => info.groupId === data.group_id);
+
+            let groupSender = new QQGroupSender(this.wrapper, data.group_id.toString(), senderId);
+            groupSender.groupInfo = groupInfo;
+            groupSender.groupName = groupInfo?.groupName;
+            groupSender.globalNickName = data.sender?.nickname;
+            groupSender.nickName = data.sender?.card;
+            groupSender.roles = [ data.sender?.role ?? 'user' ];
+            groupSender.level = data.sender?.level;
+            groupSender.title = data.sender?.title;
+
+            if (senderId !== this.robotId) {
+                message = new QQGroupMessage(groupSender, this.wrapper, data.message_id.toString());
+            } else {
+                message = new CommonSendMessage(this.wrapper, 'group', groupSender.identity, []);
+            }
+            message.time = new Date(data.time * 1000);
+
+            message = await parseQQMessageChunk<QQGroupMessage | CommonSendMessage>(this, data.message ?? [], message);
+        } else if (data.message_type === 'private') {
+            // 处理私聊消息
+            let userSender = new QQUserSender(this.wrapper, senderId);
+            userSender.nickName = data.sender?.nickname;
+
+            message = new QQPrivateMessage(userSender, this.wrapper, data.message_id.toString());
+            message.time = new Date(data.time * 1000);
+
+            message = await parseQQMessageChunk<QQPrivateMessage | CommonSendMessage>(this, data.message ?? [], message);
+        }
+
+        return message;
+    }
+
     /**
      * 处理消息事件
      * @param postData 
@@ -302,36 +351,22 @@ export default class QQRobot implements RobotAdapter {
         }
 
         if (postData.message_id) {
-            let message: QQGroupMessage | QQPrivateMessage | undefined;
-            if (postData.message_type === 'group') {
+            let message = await this.parseQQMessageData(postData);
+
+            if (message?.direction === MessageDirection.SEND) {
+                this.app.logger.error(`收到自己发送的消息：${message.id}`);
+                return;
+            }
+
+            if (message?.chatType === 'group') {
                 // 处理群消息
-                let groupInfo = this.infoProvider.groupList.find((info) => info.groupId === postData.group_id);
-
-                let groupSender = new QQGroupSender(this.wrapper, postData.group_id.toString(), postData.user_id.toString());
-                groupSender.groupInfo = groupInfo;
-                groupSender.groupName = groupInfo?.groupName;
-                groupSender.globalNickName = postData.sender?.nickname;
-                groupSender.nickName = postData.sender?.card;
-                groupSender.roles = [ postData.sender?.role ?? 'user' ];
-                groupSender.level = postData.sender?.level;
-                groupSender.title = postData.sender?.title;
-
-                message = new QQGroupMessage(groupSender, this.wrapper, postData.message_id.toString());
-                message.time = new Date(postData.time * 1000);
-
-                message = await parseQQMessageChunk(this, postData.message ?? [], message);
+                let groupSender = message.sender as QQGroupSender;
 
                 await this.infoProvider.updateGroupSender(groupSender);
                 await this.infoProvider.updateUserSender(groupSender.userSender);
-            } else if (postData.message_type === 'private') {
+            } else if (message?.chatType === 'private') {
                 // 处理私聊消息
-                let userSender = new QQUserSender(this.wrapper, postData.user_id.toString());
-                userSender.nickName = postData.sender?.nickname;
-
-                message = new QQPrivateMessage(userSender, this.wrapper, postData.message_id.toString());
-                message.time = new Date(postData.time * 1000);
-
-                message = await parseQQMessageChunk(this, postData.message ?? [], message);
+                let userSender = message.sender as QQUserSender;
 
                 await this.infoProvider.updateUserSender(userSender);
             }
@@ -346,7 +381,7 @@ export default class QQRobot implements RobotAdapter {
                 }
 
                 // 保存消息
-                let messageRef = await this.infoProvider.saveMessage(message);
+                let messageRef = await this.infoProvider.saveMessage<CommonReceivedMessage>(message as unknown as CommonReceivedMessage);
 
                 if (message.deleted) { // 不处理已删除的消息
                     this.app.logger.debug(`收到已删除的消息：${message.id}`);
@@ -699,10 +734,10 @@ export default class QQRobot implements RobotAdapter {
         try {
             let res: any = {};
             if (message.chatType === 'private') {
-                this.app.logger.debug('[DEBUG] 发送私聊消息', message.receiver.userId, msgData);
+                this.app.logger.debug('[DEBUG] 发送私聊消息：' + message.contentText, message.receiver.userId, msgData);
                 res = await this.sendToUser(message.receiver.userId!, msgData);
             } else if (message.chatType === 'group') {
-                this.app.logger.debug('[DEBUG] 发送群消息', message.receiver.groupId, msgData);
+                this.app.logger.debug('[DEBUG] 发送群消息：' + message.contentText, message.receiver.groupId, msgData);
                 res = await this.sendToGroup(message.receiver.groupId!, msgData);
             }
 
@@ -710,11 +745,11 @@ export default class QQRobot implements RobotAdapter {
             if (res?.data?.message_id) {
                 message.id = res.data.message_id.toString();
             }
+
+            this.app.logger.debug(`[DEBUG] 已发送消息：${message.id}`);
             
             // 保存消息
-            this.app.logger.debug('[DEBUG] before beforeSaveSentMessage');
             message = await this.beforeSaveSentMessage(message);
-            this.app.logger.debug('[DEBUG] after beforeSaveSentMessage');
             this.infoProvider.saveMessage(message).catch((err) => {
                 this.app.logger.error('保存消息失败', err);
             });
@@ -723,6 +758,43 @@ export default class QQRobot implements RobotAdapter {
         }
 
         return message;
+    }
+
+    async getMessageFromRecord(messageId: string): Promise<CommonSendMessage | CommonReceivedMessage | null> {
+        try {
+            const res = await this.callRobotApi('get_msg', {
+                message_id: messageId
+            });
+
+            if (!res || res.status !== 'ok') {
+                this.app.logger.debug(`无法从QQ消息记录获取消息：${messageId}`);
+                return null;
+            }
+
+            let message = await this.parseQQMessageData(res.data);
+
+            if (message) {
+                this.app.logger.debug(`已获取消息内容：${message.id}`);
+                // 下载图片
+                await this.downloadImages(message.content);
+
+                if (this.deletedMessageIds.includes(message.id!)) {
+                    // 消息已被删除
+                    message.deleted = true;
+                }
+
+                // 保存消息
+                let messageRef = await this.infoProvider.saveMessage(message);
+                this.app.logger.debug(`已保存消息：${message.id}`);
+
+                return messageRef;
+            }
+        } catch(err: any) {
+            this.app.logger.error('从QQ消息记录获取消息失败：' + err.message);
+            console.error(err);
+        }
+
+        return null;
     }
 
     async beforeSaveSentMessage(message: CommonSendMessage): Promise<CommonSendMessage> {
@@ -845,7 +917,8 @@ export default class QQRobot implements RobotAdapter {
     async doSocketQuery(method: string, data: any, timeout?: number): Promise<any> {
         return new Promise((resolve, reject) => {
             let queryId = randomUUID();
-            this.socketQueryQueue.push({
+
+            const queryParams: QueryQueueItem = {
                 method,
                 data,
                 resolve,
@@ -854,7 +927,9 @@ export default class QQRobot implements RobotAdapter {
                 time: Date.now(),
                 timeout,
                 retryTimes: 0,
-            });
+            };
+
+            this.socketQueryQueue.push(queryParams);
 
             this.startSocketQueryQueue();
         });
@@ -904,7 +979,7 @@ export default class QQRobot implements RobotAdapter {
                 }
             } catch(err: any) {
                 this.app.logger.error('[QQRobot] Socket Query Error ', err.message);
-                console.log(err);
+                console.error(err);
             }
         }
 

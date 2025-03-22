@@ -52,6 +52,7 @@ export type ChatCompleteApiConfig = {
     proxy?: string,
     st_convert?: boolean,
     disable_stream?: boolean,
+    disable_function_call?: boolean,
 } & Record<string, any>;
 
 export type ChatGPTCompletionOptions = {

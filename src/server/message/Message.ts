@@ -100,7 +100,10 @@ export class CommonMessage {
     content: MessageChunk[] = [];
     /** 主类型 */
     type: CommonMessageType = "text";
+    /** 私聊/群聊 */
     chatType: CommonMessageChatType = "private";
+    /** 消息方向 */
+    direction: MessageDirection = MessageDirection.RECEIVE;
     /** 回复的消息ID */
     repliedId?: string;
     /** 提到的人 */
@@ -255,6 +258,7 @@ export class CommonMessage {
 
 /** 基本发送的消息 */
 export class CommonSendMessage extends CommonMessage {
+    direction: MessageDirection = MessageDirection.SEND;
     /** 发送者 */
     sender: Robot;
     /** 接收者 */
@@ -313,6 +317,8 @@ export type SessionStoreGroup = {
 };
 
 export class CommonReceivedMessage extends CommonMessage {
+    direction: MessageDirection = MessageDirection.RECEIVE;
+
     /** 接收时间 */
     time: Date = new Date();
     /** 接收者 */
@@ -421,6 +427,11 @@ export class CommonReceivedMessage extends CommonMessage {
         if (this._repliedMessage === undefined) {
             if (this.repliedId && this.receiver.storages) {
                 this._repliedMessage = await this.receiver.storages.message.get<CommonSendMessage | CommonReceivedMessage>(this.repliedId);
+
+                if (!this._repliedMessage) {
+                    // 尝试从远程消息记录中获取
+                    this._repliedMessage = await this.receiver.getMessageFromRecord(this.repliedId);
+                }
             } else {
                 this._repliedMessage = null;
             }

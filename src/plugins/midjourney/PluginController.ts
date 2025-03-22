@@ -51,34 +51,36 @@ export type ImageRefScope = 'character' | 'full_scene' | 'style' | 'prompt_only'
 
 const LLM_PROMPT = `Please generate the Midjourney prompt according to the following requirements.
 
-## Output Format:
+# Output Format:
 Output should be a JSON object with the following fields:
 
-### prompt:
-The prompt should in simple English. You just need to output json. You need to describe the scene in detail.
+## prompt:
+The prompt should in simple English, describe the scene in as much detail as possible. You just need to output json. You need to describe the scene in detail.
 
-Here are some formula for a Midjourney image prompt:
- - For characters: an image of [adjective] [subject] with [clothing, earring and accessories] [doing action]
- - For landscapes, items and animals: an image of [subject] with [some creative details]
+** Guidelines for creating the prompt: **
+ - **Characters**: an image of [adjective] [subject] with [clothing, earring and accessories] [doing action]
+ - **Landscapes, items, and animals**: an image of [subject] with [some creative details]
+ - For multiple entities in the scene, separate each entity with ".". Example: "an image of [adjective] [subject] with [clothing, earring and accessories] [doing action]. [adjective] [subject] with [clothing, earring and accessories] [doing action]. [some scene]"
 
-### size:
+## size:
  - portrait: A portrait image. For example, vertical screen pictures taken by mobile phone.
  - landscape: A horizontal picture.
  - avatar: A square image, usually used as a profile picture.
 
-### subject: 
+## subject: 
  - character: Image mainly showing characters.
  - item: Image mainly showing items.
  - landscape: Image mainly showing landscapes.
  - animal: Image mainly showing animals or fantasy creatures.
 {{#if image_prompt}}
-### reference_scope:
+
+## reference_scope:
  - character: Generate an image that contains main character of the reference image. Usually use this option. If User just wants to modify something on the reference image, don't use this option.
  - full_scene: Generate an image that is compositionally similar to a reference image. Only used when there are no characters in the reference image, or user wants to modify something.
  - style: Generate an image that has same style as the reference image.
 {{/if}}
 
-## Output example:
+# Output example:
 {{#if image_prompt}}
 \`\`\`{"prompt": "an image of ...", "size": "landscape", "subject": "character", "reference_scope": "main_part"}\`\`\`.
 {{else}}
@@ -92,14 +94,14 @@ However, fictional political plots that not related with real politicians are al
 Format: \`\`\`{"error": {"code": "content_filter", "message": "The prompt contains inappropriate content."}}\`\`\`.
 
 {{#if image_prompt}}
-## User provided reference image:
+# User provided reference image:
 {{#if old_prompt}}
 prompt used when generating reference image: {{{old_prompt}}}
 {{/if}}
 Recognized image content: {{{image_prompt}}}
 {{/if}}
 
-## User input:
+# User input:
 {{{prompt}}}`;
 
 const buildLLMPrompt = Handlebars.compile(LLM_PROMPT);
@@ -116,6 +118,8 @@ const defaultConfig = {
     },
     prompt_gen_llm_id: undefined as string | undefined,
     sponsored_users: [] as string[],
+    fast_queue_timeout_minutes: 5,
+    relax_queue_timeout_minutes: 12,
 }
 
 export default class MidjourneyController extends PluginController<typeof defaultConfig> {
@@ -198,6 +202,7 @@ export default class MidjourneyController extends PluginController<typeof defaul
             const repliedMessage = await message.getRepliedMessage();
             if (!repliedMessage) {
                 await message.sendReply('未找到原始图片信息，请回复由Midjourney生成的四格图消息。', true);
+                this.logger.debug('未找到原始图片信息：' + message.repliedId);
                 return;
             }
 
