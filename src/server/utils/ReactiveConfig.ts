@@ -72,7 +72,7 @@ export class ReactiveConfig<T extends {}> {
         this._loaded = true;
     }
 
-    public async destory() {
+    public async destroy() {
         this.fileWatcher?.close();
         this.eventEmitter.removeAllListeners();
     }

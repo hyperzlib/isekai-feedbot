@@ -121,7 +121,7 @@ export default class PusherChannelController extends PluginController<typeof def
             pusher.disconnect();
         }
 
-        await this.subscribedChannelsConfig.destory();
+        await this.subscribedChannelsConfig.destroy();
     }
     
     public async loadConfig(path: string) {

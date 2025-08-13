@@ -148,9 +148,9 @@ export default class ChannelFrameworkController extends PluginController<typeof 
     }
 
     public async destroy(): Promise<void> {
-        await this.subscribeConfig.destory();
-        await this.customTplConfig.destory();
-        await this.createdChannelsCache.destory();
+        await this.subscribeConfig.destroy();
+        await this.customTplConfig.destroy();
+        await this.createdChannelsCache.destroy();
     }
 
     public async getDefaultConfig() {

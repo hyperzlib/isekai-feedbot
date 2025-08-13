@@ -7,6 +7,7 @@ import ChannelFrameworkController, { ChannelInfo } from '../channel/PluginContro
 import { Next } from 'koa';
 import got from 'got';
 import { FullRestfulContext } from '#ibot/RestfulApiManager';
+import { CronJob } from 'cron';
 
 const defaultConfig = {
     brec_api: '',
@@ -24,6 +25,8 @@ export default class BrecChannelController extends PluginController<typeof defau
     public roomInfoCache!: ReactiveConfig<Record<string, BrecRoomBaseInfo>>;
 
     private channelPlugin!: ChannelFrameworkController;
+
+    private refreshRoomInfoTask?: CronJob;
 
     public async initialize() {
         let channelPlugin = this.app.getPlugin<ChannelFrameworkController>("channel");
@@ -57,9 +60,10 @@ export default class BrecChannelController extends PluginController<typeof defau
 
         this.channelPlugin = channelPlugin;
 
-        if (this.app.debug) {
-            Pusher.logToConsole = true;
-        }
+        // 每5分钟刷新一次房间信息
+        this.refreshRoomInfoTask = new CronJob('*/5 * * * *', () => {
+            this.refreshRoomInfo();
+        });
 
         await this.initConfigs();
 
@@ -94,7 +98,8 @@ export default class BrecChannelController extends PluginController<typeof defau
     }
     
     public async destroy() {
-        await this.roomInfoCache.destory();
+        await this.roomInfoCache.destroy();
+        this.refreshRoomInfoTask?.stop();
     }
 
     public async initChannel(roomId: string, eventType: 'started' | 'ended') {
